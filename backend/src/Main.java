@@ -1,5 +1,5 @@
 package backend.src;
 
-public class App {
+public class Main {
     
 }
