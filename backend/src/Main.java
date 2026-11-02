@@ -20,6 +20,10 @@ public class Main {
         } else {
             porta = Integer.parseInt(args[0]);
         }
+
+
+
+        
         MedicationRepository medicationRepository = new InMemoryMedicationRepository();
         MedicationService medicationService = new MedicationService(medicationRepository);
         MedicationHandler medicationHandler = new MedicationHandler(medicationService);
