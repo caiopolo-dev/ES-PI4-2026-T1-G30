@@ -1,0 +1,9 @@
+# Maven build output
+/backend/target/
+
+# IntelliJ compilation output
+/out/
+
+# IntelliJ local configuration
+/.idea/
+*.iml

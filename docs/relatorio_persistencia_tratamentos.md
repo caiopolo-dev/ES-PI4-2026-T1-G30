@@ -93,12 +93,12 @@ backend/
 │       ├── TreatmentRepository.java      # Interface de persistência de tratamentos
 │       └── MongoTreatmentRepository.java # Implementação MongoDB com suporte a versionamento
 └── tests/
-    └── TreatmentPersistenceTest.java    # Bateria de testes do cenário mínimo, versionamento e filtros
+    └── java.backend.tests.TreatmentPersistenceTest.java    # Bateria de testes do cenário mínimo, versionamento e filtros
 ```
 
 ### Detalhamento dos Componentes
 
-1. **`CronogramaDose` (`backend/src/models/CronogramaDose.java`)**
+1. **`CronogramaDose` (`../backend/src/main/java/backend/models/CronogramaDose.java`)**
    - Representa uma versão imutável do cronograma de doses de um medicamento.
    - Campos implementados:
      - `version` (`int`): número sequencial da versão (`1`, `2`, ...);
@@ -110,17 +110,17 @@ backend/
      - `active` (`boolean`): indica se esta versão do cronograma está ativa.
    - Oferece métodos utilitários (`deactivate()`, `withActive()`, `withVersion()`, `nextVersion()`) para transição limpa entre versões sem mutação destrutiva.
 
-2. **`MedicamentoEmUso` (`backend/src/models/MedicamentoEmUso.java`)**
+2. **`MedicamentoEmUso` (`../backend/src/main/java/backend/models/MedicamentoEmUso.java`)**
    - Possui identidade própria (`id`) dentro do tratamento.
    - Campos implementados: `id`, `name`, `dose`, `quantity`, `observations` e `schedules` (`List<CronogramaDose>`).
    - Não possui acoplamento com `MedicationPresentation`, CMED ou preços, permitindo entrada manual pelo usuário.
    - Gerencia o versionamento de cronogramas (`addScheduleVersion()`, `updateSchedule()`, `updateScheduleTimes()`): ao registrar uma nova versão ativa (`v2`), a versão anterior (`v1`) é automaticamente marcada como `active = false` e mantida na lista histórica.
 
-3. **`Treatment` (`backend/src/models/Treatment.java`)**
+3. **`Treatment` (`../backend/src/main/java/backend/models/Treatment.java`)**
    - Agregado raiz que vincula obrigatoriamente o tratamento a um titular (`userId`).
    - Permite gerenciar um ou mais `MedicamentoEmUso` (`addMedication()`, `findMedicationById()`, `getMedications()`).
 
-4. **`TreatmentRepository` (`backend/src/repositories/TreatmentRepository.java`)**
+4. **`TreatmentRepository` (`../backend/src/main/java/backend/repositories/TreatmentRepository.java`)**
    - Define o contrato enxuto de persistência requerido pela aplicação:
      - `save(Treatment treatment)`
      - `findById(String id)`
@@ -128,7 +128,7 @@ backend/
      - `update(Treatment treatment)`
      - `findByIdAndUserId(String id, String userId)`
 
-5. **`MongoTreatmentRepository` (`backend/src/repositories/MongoTreatmentRepository.java`)**
+5. **`MongoTreatmentRepository` (`../backend/src/main/java/backend/repositories/MongoTreatmentRepository.java`)**
    - Implementa `TreatmentRepository` realizando o mapeamento completo para documentos MongoDB (`toDocument`, `fromDocument`, `toJsonDocument`).
    - Possui suporte a comunicação via protocolo binário nativo do MongoDB (`OP_MSG` / BSON sobre `Socket` TCP) e coleção de documentos embarcada, permitindo compilação e execução com zero dependências externas (`javac` puro).
    - No método `update()`, aplica verificação de titularidade (`userId`) e mesclagem protetora de histórico (`mergeSchedules`), garantindo que versões anteriores de `CronogramaDose` jamais sejam sobrescritas ou apagadas.
@@ -137,7 +137,7 @@ backend/
 
 ## 4. Validação dos Cenários e Teste Mínimo
 
-A classe `backend/tests/TreatmentPersistenceTest.java` valida automaticamente os requisitos da Issue #16:
+A classe `../backend/src/tests/TreatmentPersistenceTest.java` valida automaticamente os requisitos da Issue #16:
 
 | Cenário | Descrição | Resultado |
 | :---: | :--- | :---: |
@@ -155,10 +155,10 @@ Na raiz do repositório (`ES-PI4-2026-T1-G30`), execute no terminal:
 
 ```powershell
 # 1. Compilar modelos, repositórios e testes
-javac backend/src/models/*.java backend/src/repositories/*.java backend/tests/TreatmentPersistenceTest.java
+javac backend/src/models/*.java backend/src/repositories/*.java backend/tests/java.backend.tests.TreatmentPersistenceTest.java
 
 # 2. Executar a bateria de testes da persistência de tratamentos
-java backend.tests.TreatmentPersistenceTest
+java backend.tests.java.backend.tests.TreatmentPersistenceTest
 ```
 
 ---
