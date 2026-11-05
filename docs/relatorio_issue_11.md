@@ -45,10 +45,10 @@ MongoDB, preços, CMED e Ollama ficaram fora do escopo.
 
 ## Testes e resultados
 
-Foi criado `backend/tests/MedicationTest.java`, sem dependências externas de teste.
+Foi criado `../backend/src/tests/MedicationTest.java`, sem dependências externas de teste.
 Primeiro são verificadas as classes; depois o teste inicia o servidor em outro
 processo e faz uma requisição HTTP real. O servidor é encerrado ao final.
-As instruções estão em `backend/tests/README.md`.
+As instruções estão em `../backend/src/tests/README.md`.
 
 Na execução registrada durante a tarefa, a compilação e os testes passaram:
 

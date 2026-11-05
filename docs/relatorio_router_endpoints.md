@@ -63,11 +63,11 @@ backend/src/
 
 ### Detalhamento dos Componentes
 
-1. **`HttpHandler` (`backend/src/router/HttpHandler.java`)**
+1. **`HttpHandler` (`../backend/src/main/java/backend/router/HttpHandler.java`)**
    - Define o contrato único `HttpResponse handle(HttpRequest request)`.
    - Anotada com `@FunctionalInterface`, permitindo tanto classes dedicadas quanto expressões lambda.
 
-2. **`Router` (`backend/src/router/Router.java`)**
+2. **`Router` (`../backend/src/main/java/backend/router/Router.java`)**
    - Utiliza a estrutura `Map<String, Map<String, HttpHandler>>` (`path -> (method -> handler)`).
    - **Método `register(String method, String path, HttpHandler handler)`:** Permite registrar rotas de forma declarativa e centralizada, evitando blocos de `if / else if` espalhados pelo servidor.
    - **Método `route(HttpRequest request)`:**
@@ -75,15 +75,15 @@ backend/src/
      2. Busca o `HttpHandler` associado ao `method` HTTP dentro daquele `path`. Se não existir, retorna `405 Method Not Allowed`.
      3. Executa `handler.handle(request)` e devolve o `HttpResponse`.
 
-3. **`HealthHandler` (`backend/src/handlers/HealthHandler.java`)**
+3. **`HealthHandler` (`../backend/src/main/java/backend/handlers/HealthHandler.java`)**
    - Implementa `HttpHandler`.
    - Responde a `GET /health` com status `200 OK` e corpo JSON `{"status":"ok"}`.
 
-4. **`MedicationHandler` (`backend/src/handlers/MedicationHandler.java`)**
+4. **`MedicationHandler` (`../backend/src/main/java/backend/handlers/MedicationHandler.java`)**
    - Implementa `HttpHandler`.
    - Responde a `GET /medications` com status `200 OK` e lista JSON de medicamentos, já estruturado para receber a injeção do `MedicationService`.
 
-5. **`HttpRequest` e `HttpResponse` (`backend/src/http/`)**
+5. **`HttpRequest` e `HttpResponse` (`../backend/src/main/java/backend/http/`)**
    - Representam os dados estruturados da requisição (`method`, `path`, `httpVersion`, `headers`, `body`) e da resposta (`statusCode`, `reasonPhrase`, `headers` com `Content-Type` e `Content-Length`, `body`), prontos para integração com o `HttpRequestParser` e `HttpResponseWriter`.
 
 ---
@@ -134,7 +134,7 @@ Na raiz do repositório (`ES-PI4-2026-T1-G30`), execute os comandos abaixo no te
 javac backend/src/http/*.java backend/src/router/*.java backend/src/handlers/*.java backend/src/Main.java
 
 # 2. Executar a validação dos cenários
-java backend.src.Main
+java backend.Main
 ```
 
 ---
