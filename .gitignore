@@ -7,3 +7,11 @@
 # IntelliJ local configuration
 /.idea/
 *.iml
+
+# Binários, dados e logs do MongoDB local.
+/.local/mongodb/
+
+# Configurações privadas podem conter credenciais.
+.env
+.env.*
+!.env.example
