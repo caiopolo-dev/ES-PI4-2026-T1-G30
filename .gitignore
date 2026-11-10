@@ -3,7 +3,13 @@
 
 # IntelliJ compilation output
 /out/
+/backend/out/
 
 # IntelliJ local configuration
 /.idea/
 *.iml
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
