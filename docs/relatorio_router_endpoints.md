@@ -49,16 +49,18 @@ HttpRequest (method + path)
 
 ```text
 backend/src/
-├── Main.java                        # Ponto de entrada com registro de rotas e bateria dos 4 cenários mínimos
+├── Main.java                        # Ponto de entrada com registro de rotas e demonstração dos cenários
 ├── handlers/
 │   ├── HealthHandler.java           # Endpoint GET /health -> 200 OK {"status":"ok"}
 │   └── MedicationHandler.java       # Endpoint GET /medications -> 200 OK (preparado para o MedicationService)
 ├── http/
 │   ├── HttpRequest.java             # Modelo de requisição HTTP (method, path, httpVersion, headers, body)
 │   └── HttpResponse.java            # Modelo de resposta HTTP (statusCode, reasonPhrase, headers, body)
-└── router/
-    ├── HttpHandler.java             # Interface funcional: HttpResponse handle(HttpRequest request)
-    └── Router.java                  # Registro centralizado e roteamento por método + path
+├── router/
+│   ├── HttpHandler.java             # Interface funcional: HttpResponse handle(HttpRequest request)
+│   └── Router.java                  # Registro centralizado e roteamento por método + path
+└── tests/
+    └── RouterTest.java              # Testes unitários em JUnit 5 validando os cenários mínimos e de borda
 ```
 
 ### Detalhamento dos Componentes
@@ -85,6 +87,10 @@ backend/src/
 
 5. **`HttpRequest` e `HttpResponse` (`backend/src/http/`)**
    - Representam os dados estruturados da requisição (`method`, `path`, `httpVersion`, `headers`, `body`) e da resposta (`statusCode`, `reasonPhrase`, `headers` com `Content-Type` e `Content-Length`, `body`), prontos para integração com o `HttpRequestParser` e `HttpResponseWriter`.
+
+6. **`RouterTest` (`backend/src/tests/RouterTest.java`)**
+   - Suíte de testes unitários em **JUnit 5** (`@BeforeEach`, `@Test`, `@DisplayName`, `Assertions`) que valida isoladamente todos os cenários mínimos (`200 OK` para `/health` e `/medications`, `404 Not Found` para `/unknown`, `405 Method Not Allowed` para `POST /health`) e casos de borda (normalização case-insensitive, múltiplos métodos na mesma rota e cálculo de `Content-Length`).
+   - Documentação detalhada dos testes disponível em: [`docs/documentacao_testes_junit.md`](./documentacao_testes_junit.md).
 
 ---
 
