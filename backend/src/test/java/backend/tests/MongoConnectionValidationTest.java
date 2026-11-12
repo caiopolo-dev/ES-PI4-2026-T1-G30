@@ -3,7 +3,7 @@ package backend.tests;
 import backend.config.MongoConnection;
 import org.bson.Document;
 
-/** Verificações executáveis com Java puro, sem alterar o teste do Samuel. */
+/** Verifica a configuração, a conexão e o fechamento do cliente MongoDB. */
 public class MongoConnectionValidationTest {
     public static void main(String[] args) throws Exception {
         expectConfigurationFailure(null, "test", "MONGODB_URI");
