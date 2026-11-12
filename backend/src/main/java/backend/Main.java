@@ -1,14 +1,21 @@
+
 package backend;
 
+import backend.config.MongoConnection;
+import backend.handlers.AuthHandler;
 import backend.handlers.HealthHandler;
 import backend.handlers.MedicationHandler;
 import backend.repositories.InMemoryMedicationRepository;
 import backend.repositories.MedicationRepository;
+import backend.repositories.MongoUserRepository;
+import backend.repositories.UserRepository;
 import backend.router.Router;
 import backend.server.Servidor;
+import backend.services.AuthService;
 import backend.services.MedicationService;
 
 public class Main {
+
     public static void main(String[] args) throws Exception {
 
         int porta;
@@ -21,18 +28,32 @@ public class Main {
             porta = Integer.parseInt(args[0]);
         }
 
-
-
-        
+        // Configuração dos medicamentos
         MedicationRepository medicationRepository = new InMemoryMedicationRepository();
         MedicationService medicationService = new MedicationService(medicationRepository);
         MedicationHandler medicationHandler = new MedicationHandler(medicationService);
 
-        Router router = new Router();
-        router.register("GET", "/health", new HealthHandler());
-        router.register("GET", "/medications", medicationHandler);
 
-        Servidor servidor = new Servidor(porta, router);
-        servidor.aceitadorDeConexao();
+        
+        // Conexão com o MongoDB
+        try (MongoConnection mongoConnection = new MongoConnection()) {
+
+            // Configuração do cadastro de usuários
+            UserRepository userRepository = new MongoUserRepository(mongoConnection.getCollection("users"));
+
+            AuthService authService = new AuthService(userRepository);
+            AuthHandler authHandler = new AuthHandler(authService);
+
+            // Configuração das rotas HTTP
+            Router router = new Router();
+
+            router.register("GET", "/health", new HealthHandler());
+            router.register("GET", "/medications", medicationHandler);
+            router.register("POST", "/auth/register", authHandler);
+
+            // Inicialização do servidor
+            Servidor servidor = new Servidor(porta, router);
+            servidor.aceitadorDeConexao();
+        }
     }
 }
