@@ -1,5 +1,8 @@
 package backend.tests;
 
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import backend.config.MongoConnection;
 import backend.models.User;
 import backend.repositories.MongoUserRepository;
@@ -10,8 +13,10 @@ import backend.services.UserService;
 import java.util.UUID;
 
 /** Testa o fluxo completo de persistência pelo serviço de usuários. */
+@org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
 public class UserPersistenceIntegrationTest {
-    public static void main(String[] args) {
+    @Test
+    void validatesExistingScenarios() {
         // O teste não usa variáveis do Atlas nem o banco compartilhado.
         String uri = "mongodb://127.0.0.1:27017";
         String database = "dosecerta_test_service_" + UUID.randomUUID().toString().replace("-", "");
@@ -53,7 +58,6 @@ public class UserPersistenceIntegrationTest {
                     check(connection.getCollection("users").countDocuments() == 1,
                         "Tentativa duplicada não deveria alterar o número de usuários.");
                 }
-                System.out.println("PASS: serviço -> repository -> MongoDB, recuperação após reabrir conexão e conflito.");
             } finally {
                 // Limpa apenas o banco temporário criado por esta execução.
                 cleanup.getDatabase().drop();
@@ -62,8 +66,6 @@ public class UserPersistenceIntegrationTest {
     }
 
     private static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(condition, message);
     }
 }

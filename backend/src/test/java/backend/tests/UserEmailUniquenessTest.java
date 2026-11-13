@@ -1,5 +1,8 @@
 package backend.tests;
 
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import backend.config.MongoConnection;
 import backend.models.User;
 import backend.repositories.MongoUserRepository;
@@ -12,8 +15,10 @@ import java.util.concurrent.TimeUnit;
 import org.bson.Document;
 
 /** Verifica normalização e unicidade em um banco local temporário. */
+@org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
 public class UserEmailUniquenessTest {
-    public static void main(String[] args) throws Exception {
+    @Test
+    void validatesExistingScenarios() throws Exception {
         String database = "dosecerta_test_email_" + UUID.randomUUID().toString().replace("-", "");
         try (MongoConnection connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
             try {
@@ -62,7 +67,6 @@ public class UserEmailUniquenessTest {
                 } catch (IllegalArgumentException expected) {
                     check(collection.countDocuments() == 3, "Entrada inválida não deveria ser inserida.");
                 }
-                System.out.println("PASS: normalização, índice único, duplicidade, concorrência e consistência.");
             } finally {
                 // Limpa somente o banco gerado por esta execução.
                 connection.getDatabase().drop();
@@ -91,8 +95,6 @@ public class UserEmailUniquenessTest {
     }
 
     private static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(condition, message);
     }
 }

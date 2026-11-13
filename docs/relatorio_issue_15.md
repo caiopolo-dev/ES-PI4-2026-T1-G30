@@ -159,45 +159,37 @@ mvn -f backend/pom.xml test
 
 Na execução registrada da etapa 10, os 13 testes JUnit do parser e writer passaram.
 
-### Verificações executáveis por main
+### Testes da issue #15 em JUnit 5
 
-Os testes abaixo possuem `main()` próprio e não são executados automaticamente
-pelo comando `mvn test`. Depois de compilar, prepare o classpath:
+As sete classes foram convertidas de programas com main para métodos com @Test.
+O Maven agora descobre esses testes automaticamente.
 
-```powershell
-mvn -f backend/pom.xml test dependency:copy-dependencies "-DincludeScope=runtime"
-$testClasspath = 'backend/target/classes;backend/target/test-classes;backend/target/dependency/*'
-```
-
-Sem necessidade de banco real:
+Sem MongoDB real, execute na raiz do repositório:
 
 ```powershell
-java -cp $testClasspath backend.tests.UserDocumentMapperTest
-java -cp $testClasspath backend.tests.UserServiceTest
-java -cp $testClasspath backend.tests.MongoConnectionValidationTest
+mvn -f backend/pom.xml test
 ```
 
-O último teste também utiliza uma porta local reservada, sem MongoDB, para
-verificar a falha de conexão. A opção `--integration` habilita uma verificação
-adicional de ping usando as variáveis do ambiente, sem gravar documentos.
+Isso executa UserDocumentMapperTest, UserServiceTest e as validações de
+configuração e servidor indisponível de MongoConnectionValidationTest.
 
-Com MongoDB local em execução em `127.0.0.1:27017`:
+Para executar todos, inicie um MongoDB local em 127.0.0.1:27017:
 
 ```powershell
-java -cp $testClasspath backend.tests.MongoUserRepositoryTest
-java -cp $testClasspath backend.tests.UserEmailUniquenessTest
-java -cp $testClasspath backend.tests.UserPersistenceErrorTest
-java -cp $testClasspath backend.tests.UserPersistenceIntegrationTest
+$env:MONGODB_URI = 'mongodb://127.0.0.1:27017'
+$env:MONGODB_DATABASE = 'dosecerta_test_ping'
+mvn -f backend/pom.xml "-Dmongo.integration=true" test
 ```
 
-Esses quatro testes usam endereço local fixo e nomes de banco aleatórios exclusivos
-de cada execução. Os bancos são removidos ao final, inclusive o validador
-temporário criado para testar uma escrita rejeitada. Eles não utilizam a URI do Atlas.
-Use somente uma instância local de desenvolvimento, com permissão para criar e
-remover os bancos temporários.
+A propriedade habilita MongoUserRepositoryTest, UserEmailUniquenessTest,
+UserPersistenceErrorTest, UserPersistenceIntegrationTest e o ping real de
+MongoConnectionValidationTest. Sem ela, esses testes aparecem como ignorados.
+Os quatro testes de escrita usam bancos locais aleatórios, removidos ao final.
+O ping usa as variáveis acima e não grava documentos.
 
-Cada programa termina com erro se uma verificação falhar. Não é necessário usar
-`-ea`, pois as verificações lançam `AssertionError` explicitamente.
+Para selecionar uma classe, acrescente, por exemplo,
+`"-Dtest=UserDocumentMapperTest"` ao comando Maven.
+Os relatórios ficam em backend/target/surefire-reports.
 
 ## Resultados registrados em 12/11/2026
 
