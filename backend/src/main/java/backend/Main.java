@@ -54,25 +54,7 @@ public class Main {
         // Conexão com o MongoDB
         try (MongoConnection mongoConnection = new MongoConnection()) {
 
-        // A aplicação compartilha a conexão durante toda a execução do servidor.
-        try (MongoConnection connection = new MongoConnection()) {
-            UserRepository userRepository = new MongoUserRepository(connection.getCollection("users"));
-            // Os futuros handlers de usuários receberão este serviço pelo construtor.
-            UserService userService = new UserService(userRepository);
 
-            // Também fecha o cliente ao encerrar o processo com Ctrl+C.
-            Thread shutdown = new Thread(connection::close, "mongodb-shutdown");
-            Runtime.getRuntime().addShutdownHook(shutdown);
-            try {
-                Servidor servidor = new Servidor(porta, router);
-                servidor.aceitadorDeConexao();
-            } finally {
-                try {
-                    Runtime.getRuntime().removeShutdownHook(shutdown);
-                } catch (IllegalStateException e) {
-                    // O hook já está sendo executado durante o encerramento do processo.
-                }
-            }
             // Configuração do cadastro de usuários
             UserRepository userRepository = new MongoUserRepository(mongoConnection.getCollection("users"));
             AuthService authService = new AuthService(userRepository);
