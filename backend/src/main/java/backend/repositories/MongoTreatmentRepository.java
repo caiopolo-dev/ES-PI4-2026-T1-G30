@@ -37,7 +37,7 @@ import java.util.Optional;
  */
 public class MongoTreatmentRepository implements TreatmentRepository {
 
-    public static final String DEFAULT_DATABASE = "dosecerta";
+    public static final String DEFAULT_DATABASE = "dosecerta-dev";
     public static final String DEFAULT_COLLECTION = "treatments";
 
     private final String host;
