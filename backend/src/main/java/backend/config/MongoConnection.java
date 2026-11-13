@@ -48,9 +48,9 @@ public final class MongoConnection implements AutoCloseable {
             if (openedClient != null) {
                 openedClient.close();
             }
-            // Não expõe a URI, credenciais ou mensagens internas do driver.
             throw new IllegalStateException(
-                "Não foi possível conectar ao MongoDB. Confira a configuração e o servidor.");
+                "Não foi possível conectar ao MongoDB. Confira a configuração e o servidor."
+            );
         }
     }
 
