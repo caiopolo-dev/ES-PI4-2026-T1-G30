@@ -9,6 +9,7 @@ import java.net.Socket;
 public class Servidor {
     int porta;
     private final Router router;
+    private volatile ServerSocket activeServerSocket;
 
     public Servidor(int porta){
         this(porta, new Router());
@@ -21,7 +22,7 @@ public class Servidor {
 
     public void aceitadorDeConexao(){
         try(ServerSocket servidorSocket = new ServerSocket(this.porta);){
-           
+            this.activeServerSocket = servidorSocket;
             while (!servidorSocket.isClosed()) {
                 
                 Socket socket = servidorSocket.accept();
@@ -31,10 +32,22 @@ public class Servidor {
 
             }
         }catch(IOException e ){
-            System.out.println(e.getMessage());
+            if (activeServerSocket == null || !activeServerSocket.isClosed()) {
+                System.out.println(e.getMessage());
+            }
         }catch(Exception e){
             System.out.println(e.getMessage());
         }
            
+    }
+
+    public void parar() {
+        ServerSocket socket = this.activeServerSocket;
+        if (socket != null && !socket.isClosed()) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+            }
+        }
     }
 }
