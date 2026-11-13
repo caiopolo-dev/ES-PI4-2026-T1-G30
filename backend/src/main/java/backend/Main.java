@@ -1,10 +1,9 @@
-
 package backend;
 
 import backend.auth.InMemorySessionAuthenticator;
 import backend.config.MongoConnection;
+import backend.handlers.AdherenceHandler;
 import backend.handlers.AgendaHandler;
-import backend.config.MongoConnection;
 import backend.handlers.AuthHandler;
 import backend.handlers.HealthHandler;
 import backend.handlers.MedicationHandler;
@@ -18,11 +17,8 @@ import backend.repositories.PlannedDoseRepository;
 import backend.repositories.UserRepository;
 import backend.router.Router;
 import backend.server.Servidor;
+import backend.services.AdherenceService;
 import backend.services.AgendaService;
-import backend.repositories.MongoUserRepository;
-import backend.repositories.UserRepository;
-import backend.router.Router;
-import backend.server.Servidor;
 import backend.services.AuthService;
 import backend.services.MedicationService;
 
@@ -45,40 +41,29 @@ public class Main {
         MedicationService medicationService = new MedicationService(medicationRepository);
         MedicationHandler medicationHandler = new MedicationHandler(medicationService);
 
+        // Configuração de agenda e adesão/pontualidade
         PlannedDoseRepository plannedDoseRepository = new MongoPlannedDoseRepository();
         DoseRecordRepository doseRecordRepository = new MongoDoseRecordRepository();
         AgendaService agendaService = new AgendaService(plannedDoseRepository, doseRecordRepository);
+        AdherenceService adherenceService = new AdherenceService(plannedDoseRepository, doseRecordRepository);
         InMemorySessionAuthenticator sessionAuthenticator = new InMemorySessionAuthenticator();
         AgendaHandler agendaHandler = new AgendaHandler(agendaService, sessionAuthenticator);
+        AdherenceHandler adherenceHandler = new AdherenceHandler(adherenceService, sessionAuthenticator);
 
-        try (MongoConnection mongoConnection = new MongoConnection()) {
-            UserRepository userRepository = new MongoUserRepository(mongoConnection.getCollection("users"));
-
-            AuthService authService = new AuthService(userRepository);
-            AuthHandler authHandler = new AuthHandler(authService);
-
-            Router router = new Router();
-            router.register("GET", "/health", new HealthHandler());
-            router.register("GET", "/medications", medicationHandler);
-            router.register("GET", "/doses", agendaHandler);
-            router.register("POST", "/auth/register", authHandler);
-
-
-        
         // Conexão com o MongoDB
         try (MongoConnection mongoConnection = new MongoConnection()) {
 
             // Configuração do cadastro de usuários
             UserRepository userRepository = new MongoUserRepository(mongoConnection.getCollection("users"));
-
             AuthService authService = new AuthService(userRepository);
             AuthHandler authHandler = new AuthHandler(authService);
 
             // Configuração das rotas HTTP
             Router router = new Router();
-
             router.register("GET", "/health", new HealthHandler());
             router.register("GET", "/medications", medicationHandler);
+            router.register("GET", "/doses", agendaHandler);
+            router.register("GET", "/adherence/summary", adherenceHandler);
             router.register("POST", "/auth/register", authHandler);
 
             // Inicialização do servidor
