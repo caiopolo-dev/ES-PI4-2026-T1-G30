@@ -31,6 +31,10 @@ public class HttpResponse {
         return new HttpResponse(400, "Bad Request", "{\"error\":\"" + message + "\"}");
     }
 
+    public static HttpResponse unauthorized(String message) {
+        return new HttpResponse(401, "Unauthorized", "{\"error\":\"" + message + "\"}");
+    }
+
     public static HttpResponse notFound(String message) {
         return new HttpResponse(404, "Not Found", "{\"error\":\"" + message + "\"}");
     }
