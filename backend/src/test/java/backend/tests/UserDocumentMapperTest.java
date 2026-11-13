@@ -1,12 +1,16 @@
 package backend.tests;
 
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import backend.models.User;
 import backend.repositories.UserDocumentMapper;
 import org.bson.Document;
 
 /** Testa a conversão dos dados sem conectar ao banco. */
 public class UserDocumentMapperTest {
-    public static void main(String[] args) {
+    @Test
+    void validatesExistingScenarios() {
         UserDocumentMapper mapper = new UserDocumentMapper();
         // Valores fictícios; o mapper não gera nem verifica senhas.
         User user = new User("user-1", "Usuário Teste", "Teste@example.com", "teste@example.com",
@@ -46,21 +50,14 @@ public class UserDocumentMapperTest {
         User invalid = new User("user-1", " ", "teste@example.com", "teste@example.com",
             "hash-ficticio", "salt-ficticio", "PBKDF2WithHmacSHA256", 600000);
         expectInvalid(() -> mapper.toDocument(invalid));
-        System.out.println("PASS: conversão completa, campos obrigatórios, tipos e iterações.");
     }
 
     private static void expectInvalid(Runnable operation) {
-        try {
-            operation.run();
-            throw new AssertionError("Entrada inválida deveria ser rejeitada.");
-        } catch (IllegalArgumentException expected) {
+        IllegalArgumentException expected = assertThrows(IllegalArgumentException.class, operation::run);
             check(!expected.getMessage().contains("hash-ficticio"), "Erro não deve expor dados sensíveis.");
-        }
     }
 
     private static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(condition, message);
     }
 }

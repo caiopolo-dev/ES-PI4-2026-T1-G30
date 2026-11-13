@@ -1,5 +1,8 @@
 package backend.tests;
 
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import backend.config.MongoConnection;
 import backend.models.User;
 import backend.repositories.MongoUserRepository;
@@ -7,8 +10,10 @@ import backend.repositories.UserDocumentMapper;
 import java.util.UUID;
 
 /** Verifica a persistência em um banco local exclusivo para a execução. */
+@org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
 public class MongoUserRepositoryTest {
-    public static void main(String[] args) {
+    @Test
+    void validatesExistingScenarios() {
         // Não utiliza a URI do Atlas nem o banco compartilhado da equipe.
         String uri = "mongodb://127.0.0.1:27017";
         String database = "dosecerta_test_users_" + UUID.randomUUID().toString().replace("-", "");
@@ -36,7 +41,6 @@ public class MongoUserRepositoryTest {
                     check(secondRepository.findById("test-user").isPresent(), "Usuário não foi persistido.");
                 }
                 check(connection.getCollection("users").countDocuments() == 1, "Quantidade de usuários inesperada.");
-                System.out.println("PASS: gravação, busca por ID/e-mail, campos preservados e usuário inexistente.");
             } finally {
                 // Remove somente o banco de teste gerado acima.
                 connection.getDatabase().drop();
@@ -45,8 +49,6 @@ public class MongoUserRepositoryTest {
     }
 
     private static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(condition, message);
     }
 }

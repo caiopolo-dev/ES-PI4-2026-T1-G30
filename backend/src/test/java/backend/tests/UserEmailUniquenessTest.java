@@ -1,6 +1,9 @@
 
 package backend.tests;
 
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import backend.config.MongoConnection;
 import backend.models.User;
 import backend.repositories.MongoUserRepository;
@@ -14,30 +17,13 @@ import java.util.concurrent.TimeUnit;
 
 import org.bson.Document;
 
-/**
- * Verifica normalização, unicidade e concorrência no MongoDB.
- * Utiliza um banco temporário exclusivo, que é excluído ao terminar.
- */
+/** Verifica normalização e unicidade em um banco local temporário. */
+@org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
 public class UserEmailUniquenessTest {
-
-    public static void main(String[] args) throws Exception {
-
-        // Obtém a URI do MongoDB pelas variáveis de ambiente.
-        String uri = System.getenv("MONGODB_URI");
-
-        if (uri == null || uri.isBlank()) {
-            throw new IllegalStateException(
-                "MONGODB_URI não configurada."
-            );
-        }
-
-        // Gera um nome exclusivo para o banco de testes.
-        String database = "dosecerta_test_email_"
-            + UUID.randomUUID().toString().replace("-", "");
-
-        // Abre a conexão com o banco temporário.
-        try (MongoConnection connection = new MongoConnection(uri, database)) {
-
+    @Test
+    void validatesExistingScenarios() throws Exception {
+        String database = "dosecerta_test_email_" + UUID.randomUUID().toString().replace("-", "");
+        try (MongoConnection connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
             try {
                 var collection = connection.getCollection("users");
 
@@ -176,12 +162,6 @@ public class UserEmailUniquenessTest {
                         "Entrada inválida não deveria ser inserida."
                     );
                 }
-
-                System.out.println(
-                    "PASS: normalização, índice único, duplicidade, " +
-                    "concorrência e consistência."
-                );
-
             } finally {
 
                 // Exclui exclusivamente o banco temporário deste teste.
@@ -246,9 +226,6 @@ public class UserEmailUniquenessTest {
      * Interrompe o teste caso uma condição não seja atendida.
      */
     private static void check(boolean condition, String message) {
-
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(condition, message);
     }
 }
