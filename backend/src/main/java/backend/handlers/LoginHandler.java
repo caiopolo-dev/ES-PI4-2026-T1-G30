@@ -12,13 +12,17 @@ import java.util.Objects;
 import org.bson.Document;
 import backend.models.User;
 
+import backend.services.SessionService;
+
 
 public class LoginHandler implements HttpHandler {
     private final LoginService loginService;
+    private final SessionService sessionService;
 
-    public LoginHandler(LoginService loginService) {
+    public LoginHandler(LoginService loginService, SessionService sessionService) {
         this.loginService = Objects.requireNonNull(loginService);
-    }
+        this.sessionService = Objects.requireNonNull(sessionService);
+    }   
 
     @Override
     public HttpResponse handle(HttpRequest request) {
@@ -55,11 +59,15 @@ public class LoginHandler implements HttpHandler {
         // Cria objeto LoginRequest a partir do JSON
         String email = json.getString("email");
         String password = json.getString("password");
+
         LoginRequest loginRequest = new LoginRequest(email, password);
 
         User user;
+        String token;
+
         try {
             user = loginService.login(loginRequest);
+            token = sessionService.create(user.getId());
 
         } catch (InvalidCredentialsException e) {
             return new HttpResponse(401,"Unauthorized","{\"error\":\"Credenciais inválidas.\"}");
@@ -79,10 +87,11 @@ public class LoginHandler implements HttpHandler {
         }
 
 
-        String responseJson = new Document()
+       String responseJson = new Document()
             .append("id", user.getId())
             .append("name", user.getName())
             .append("email", user.getEmail())
+            .append("token", token)
             .toJson();
 
         return HttpResponse.ok(responseJson);

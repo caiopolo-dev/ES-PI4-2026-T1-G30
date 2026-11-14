@@ -21,6 +21,10 @@ import backend.services.AuthService;
 import backend.handlers.LoginHandler;
 import backend.services.LoginService;
 
+import backend.repositories.SessionRepository;
+import backend.repositories.MongoSessionRepository;
+import backend.services.SessionService;
+
 public class Main {
 
     public static void main(String[] args) throws Exception {
@@ -51,8 +55,13 @@ public class Main {
             AuthService authService = new AuthService(userRepository);
             AuthHandler authHandler = new AuthHandler(authService);
 
+            
             LoginService loginService = new LoginService(userRepository);
-            LoginHandler loginHandler = new LoginHandler(loginService);
+            // Configuração das sessões
+            SessionRepository sessionRepository = new MongoSessionRepository(mongoConnection.getCollection("auth_sessions"));
+            SessionService sessionService = new SessionService(sessionRepository);
+            LoginHandler loginHandler = new LoginHandler(loginService,sessionService);
+
 
             // Configuração das rotas HTTP
             Router router = new Router();

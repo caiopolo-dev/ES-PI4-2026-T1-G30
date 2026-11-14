@@ -49,7 +49,8 @@ public final class MongoConnection implements AutoCloseable {
                 openedClient.close();
             }
             throw new IllegalStateException(
-                "Não foi possível conectar ao MongoDB. Confira a configuração e o servidor."
+                "Não foi possível conectar ao MongoDB. Confira a configuração e o servidor.",
+                e
             );
         }
     }

@@ -49,12 +49,7 @@ public class LoginService {
 
         LoginHasher loginHasher = new LoginHasher();
 
-        boolean senhaCorreta = loginHasher.verifyPassword(
-            password.toCharArray(),
-            user.getPasswordHash(),
-            user.getPasswordSalt(),
-            user.getPasswordIterations()
-        );
+        boolean senhaCorreta = loginHasher.verifyPassword(password.toCharArray(),user.getPasswordHash(),user.getPasswordSalt(),user.getPasswordIterations());
 
         if (!senhaCorreta) {
             throw new InvalidCredentialsException();
