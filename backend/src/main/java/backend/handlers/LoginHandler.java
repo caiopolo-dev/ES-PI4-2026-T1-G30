@@ -13,15 +13,23 @@ import org.bson.Document;
 import backend.models.User;
 
 import backend.services.SessionService;
+import backend.services.LoginRateLimiter;
 
 
 public class LoginHandler implements HttpHandler {
     private final LoginService loginService;
     private final SessionService sessionService;
+    private final LoginRateLimiter rateLimiter;
 
     public LoginHandler(LoginService loginService, SessionService sessionService) {
+        this(loginService, sessionService, new LoginRateLimiter());
+    }
+
+    public LoginHandler(LoginService loginService, SessionService sessionService,
+                        LoginRateLimiter rateLimiter) {
         this.loginService = Objects.requireNonNull(loginService);
         this.sessionService = Objects.requireNonNull(sessionService);
+        this.rateLimiter = Objects.requireNonNull(rateLimiter);
     }   
 
     @Override
@@ -59,6 +67,14 @@ public class LoginHandler implements HttpHandler {
         // Cria objeto LoginRequest a partir do JSON
         String email = json.getString("email");
         String password = json.getString("password");
+
+        if (!rateLimiter.allow(email)) {
+            return new HttpResponse(
+                429,
+                "Too Many Requests",
+                "{\"error\":\"Muitas tentativas de login. Tente novamente mais tarde.\"}"
+            );
+        }
 
         LoginRequest loginRequest = new LoginRequest(email, password);
 

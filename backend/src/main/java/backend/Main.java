@@ -24,6 +24,10 @@ import backend.services.LoginService;
 import backend.repositories.SessionRepository;
 import backend.repositories.MongoSessionRepository;
 import backend.services.SessionService;
+import backend.services.BearerTokenExtractor;
+import backend.services.LoginRateLimiter;
+import backend.handlers.MeHandler;
+import backend.handlers.LogoutHandler;
 
 public class Main {
 
@@ -60,7 +64,12 @@ public class Main {
             // Configuração das sessões
             SessionRepository sessionRepository = new MongoSessionRepository(mongoConnection.getCollection("auth_sessions"));
             SessionService sessionService = new SessionService(sessionRepository);
-            LoginHandler loginHandler = new LoginHandler(loginService,sessionService);
+            
+            BearerTokenExtractor bearerTokenExtractor = new BearerTokenExtractor();
+            LoginRateLimiter loginRateLimiter = new LoginRateLimiter();
+            LoginHandler loginHandler = new LoginHandler(loginService, sessionService, loginRateLimiter);
+            MeHandler meHandler = new MeHandler(sessionService, userRepository, bearerTokenExtractor);
+            LogoutHandler logoutHandler = new LogoutHandler(sessionService, bearerTokenExtractor);
 
 
             // Configuração das rotas HTTP
@@ -70,6 +79,8 @@ public class Main {
             router.register("GET", "/medications", medicationHandler);
             router.register("POST", "/auth/register", authHandler);
             router.register("POST", "/auth/login", loginHandler);
+            router.register("GET", "/auth/me", meHandler);
+            router.register("POST", "/auth/logout", logoutHandler);
 
             // Inicialização do servidor
             Servidor servidor = new Servidor(porta, router);
