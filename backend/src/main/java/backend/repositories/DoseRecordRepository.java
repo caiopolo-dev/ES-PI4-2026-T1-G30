@@ -30,4 +30,26 @@ public interface DoseRecordRepository {
      * Retorna a quantidade total de registros armazenados (útil para verificação de ausência de efeitos colaterais).
      */
     int countAll();
+
+    // Devolve somente registros vinculados as doses e ao titular solicitado.
+    default Map<String, RegistroDeDose> findByPlannedDoseIdsAndUserId(
+            Collection<String> plannedDoseIds, String userId) {
+        Map<String, RegistroDeDose> result = new java.util.LinkedHashMap<>();
+        if (userId == null || userId.isBlank() || plannedDoseIds == null || plannedDoseIds.isEmpty()) {
+            return result;
+        }
+        Map<String, RegistroDeDose> records = findByPlannedDoseIds(plannedDoseIds);
+        if (records == null) {
+            return result;
+        }
+        for (var entry : records.entrySet()) {
+            RegistroDeDose record = entry.getValue();
+            if (record != null && plannedDoseIds.contains(entry.getKey())
+                    && entry.getKey().equals(record.getPlannedDoseId())
+                    && userId.equals(record.getUserId())) {
+                result.put(entry.getKey(), record);
+            }
+        }
+        return result;
+    }
 }

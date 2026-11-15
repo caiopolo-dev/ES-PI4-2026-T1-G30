@@ -150,7 +150,7 @@ public class AdherenceService {
         }
 
         Map<String, RegistroDeDose> recordsByDoseId =
-                doseRecordRepository.findByPlannedDoseIds(eligibleById.keySet());
+                doseRecordRepository.findByPlannedDoseIdsAndUserId(eligibleById.keySet(), normalizedUserId);
 
         int takenDoses = 0;
         int skippedDoses = 0;

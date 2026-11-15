@@ -1,5 +1,6 @@
 package backend.router;
 
+import backend.auth.AccessAudit;
 import backend.http.HttpRequest;
 import backend.http.HttpResponse;
 
@@ -12,6 +13,16 @@ import java.util.Map;
  * com base no método HTTP (GET, POST, etc.) e no caminho (path).
  */
 public class Router {
+    private final backend.auth.SessionAuthenticator authenticator;
+
+    public Router() {
+        this(request -> java.util.Optional.empty());
+    }
+
+    public Router(backend.auth.SessionAuthenticator authenticator) {
+        this.authenticator = java.util.Objects.requireNonNull(authenticator);
+    }
+
 
     // Mapa que relaciona: path -> (method -> HttpHandler)
     // Ex: "/health" -> { "GET" -> HealthHandler }
@@ -51,6 +62,38 @@ public class Router {
         }
 
         // 3. Delega o processamento para o handler correspondente
-        return handler.handle(request);
+        if (RouteAccessPolicy.requiresAuthentication(method, path)) {
+            try {
+                var userId = authenticator.resolveAuthenticatedUserId(request);
+                if (userId.isEmpty() || userId.get().isBlank()) {
+                    AccessAudit.record(AccessAudit.Event.AUTHENTICATION_REQUIRED);
+                    return HttpResponse.unauthorized("Invalid, expired, or missing session");
+                }
+                return execute(handler, request.withAuthContext(new backend.auth.AuthContext(userId.get())));
+            } catch (RuntimeException error) {
+                return HttpResponse.internalServerError("Internal server error");
+            }
+        }
+        return execute(handler, request);
+    }
+
+    private HttpResponse execute(HttpHandler handler, HttpRequest request) {
+        try {
+            HttpResponse response = handler.handle(request);
+            if (response.getStatusCode() == 401) {
+                AccessAudit.record(AccessAudit.Event.AUTHENTICATION_REQUIRED);
+            } else if (response.getStatusCode() == 403) {
+                AccessAudit.record(AccessAudit.Event.PERMISSION_DENIED);
+            }
+            return response;
+        } catch (backend.auth.ResourceNotFoundException error) {
+            AccessAudit.record(AccessAudit.Event.RESOURCE_UNAVAILABLE);
+            return HttpResponse.notFound("Recurso nao encontrado.");
+        } catch (backend.auth.AccessDeniedException error) {
+            AccessAudit.record(AccessAudit.Event.PERMISSION_DENIED);
+            return HttpResponse.forbidden("Acesso negado.");
+        } catch (RuntimeException error) {
+            return HttpResponse.internalServerError("Internal server error");
+        }
     }
 }

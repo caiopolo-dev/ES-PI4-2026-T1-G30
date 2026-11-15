@@ -75,8 +75,8 @@ public class AdherenceTest {
                 Duration.ofMinutes(30),
                 Duration.ofMinutes(30));
 
-        adherenceHandler = new AdherenceHandler(adherenceService, authenticator);
-        router = new Router();
+        adherenceHandler = new AdherenceHandler(adherenceService);
+        router = new Router(authenticator);
         router.register("GET", "/adherence/summary", adherenceHandler);
     }
 

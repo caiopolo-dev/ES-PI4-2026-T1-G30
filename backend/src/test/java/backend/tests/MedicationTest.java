@@ -22,7 +22,7 @@ public class MedicationTest {
         testClasses();
         System.out.println("PASS: modelo, repository, service e handler");
         testHttp();
-        System.out.println("PASS: GET /medications com servidor real");
+        System.out.println("PASS: GET /medications sem sessao bloqueado pelo servidor");
     }
 
     private static void testClasses() {
@@ -98,11 +98,10 @@ public class MedicationTest {
                     Thread.sleep(100);
                 }
             }
-            check(response != null && response.statusCode() == 200, "HTTP 200");
+            check(response != null && response.statusCode() == 401, "HTTP 401 sem sessao");
             check(response.headers().firstValue("Content-Type").orElse("")
                 .equals("application/json; charset=utf-8"), "Content-Type JSON UTF-8");
-            check(response.body().equals("[{\"id\":\"1\",\"name\":\"Losartana 50 mg\"},"
-                + "{\"id\":\"2\",\"name\":\"Sinvastatina 20 mg\"}]"), "Medicamentos na resposta HTTP");
+            check(response.body().contains("Invalid, expired, or missing session"), "Sessao obrigatoria");
             check(Integer.parseInt(response.headers().firstValue("Content-Length").orElse("-1"))
                 == response.body().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
                 "Content-Length em bytes");

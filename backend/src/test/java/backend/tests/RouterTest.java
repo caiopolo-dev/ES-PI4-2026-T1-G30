@@ -28,7 +28,7 @@ public class RouterTest {
 
     @BeforeEach
     void setUp() {
-        router = new Router();
+        router = new Router(request -> java.util.Optional.of("test-user"));
         router.register("GET", "/health", new HealthHandler());
         router.register(
                 "GET",
