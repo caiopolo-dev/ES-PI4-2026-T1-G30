@@ -1,5 +1,8 @@
 package backend.tests;
 
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import backend.config.MongoConnection;
 import backend.models.User;
 import backend.repositories.MongoUserRepository;
@@ -8,8 +11,10 @@ import java.util.UUID;
 import org.bson.Document;
 
 /** Verifica erros usando somente um banco local temporário. */
+@org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
 public class UserPersistenceErrorTest {
-    public static void main(String[] args) {
+    @Test
+    void validatesExistingScenarios() {
         String uri = "mongodb://127.0.0.1:27017";
         String database = "dosecerta_test_errors_" + UUID.randomUUID().toString().replace("-", "");
         try (MongoConnection connection = new MongoConnection(uri, database)) {
@@ -52,7 +57,6 @@ public class UserPersistenceErrorTest {
                 expectFailure(() -> repository.save(sampleUser("rejected", "rejected@example.com")),
                     UserPersistenceException.Reason.DATABASE_ERROR);
                 check(collection.countDocuments() == 2, "Operações rejeitadas não deveriam gravar dados.");
-                System.out.println("PASS: duplicidade, documento inválido, ausência, conexão fechada e erro do banco.");
             } finally {
                 // Remove somente o banco criado acima, incluindo seu validador.
                 connection.getDatabase().drop();
@@ -66,19 +70,13 @@ public class UserPersistenceErrorTest {
     }
 
     private static void expectFailure(Runnable operation, UserPersistenceException.Reason reason) {
-        try {
-            operation.run();
-            throw new AssertionError("Operação deveria falhar.");
-        } catch (UserPersistenceException expected) {
+        UserPersistenceException expected = assertThrows(UserPersistenceException.class, operation::run);
             check(expected.getReason() == reason, "Classificação incorreta do erro.");
             check(expected.getCause() == null, "Erro não deve expor a causa do driver.");
             check(!expected.getMessage().contains("example.com"), "Erro não deve expor e-mail.");
-        }
     }
 
     private static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(condition, message);
     }
 }

@@ -61,8 +61,7 @@ public class HttpRequestParser {
             }
             offset += count;
         }
-        String path = parts[1].split("\\?", 2)[0];
-        return new HttpRequest(parts[0], path, parts[2], headers,
+        return new HttpRequest(parts[0], parts[1], parts[2], headers,
             new String(body, StandardCharsets.UTF_8));
     }
 
