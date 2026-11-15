@@ -40,3 +40,17 @@ AgendaHandler e AdherenceHandler recebem somente o servico de negocio e obtem o 
 
 AuthenticatedIdentityTest comprova que campos do cliente e um token nao validado nao liberam chamadas diretas aos handlers. Os testes HTTP de agenda e indicadores verificam rejeicao de userId na query e isolamento entre titulares. A protecao de operacoes de tratamentos e doses sera completada nas proximas etapas.
 
+
+## Etapa 5: acesso a tratamentos e medicamentos
+
+TreatmentAccessService recebe AuthContext e TreatmentRepository. Lista pelo titular e consulta por ID junto ao titular; a consulta de medicamento exige tratamento proprio e vinculo com esse tratamento. A atualizacao verifica o tratamento existente e impede alterar seu titular. Recursos inexistentes e alheios lancam a mesma NoSuchElementException generica.
+
+Nao foram criados endpoints nem regras de ciclo de vida da issue #26/#27. Os futuros handlers devem chamar esta camada com o contexto do Router e traduzir a ausencia para 404. A integracao HTTP de edicao/desativacao de medicamentos permanece pendente desses endpoints. Os testes usam o armazenamento em memoria existente de MongoTreatmentRepository; nao comprovam persistencia real.
+
+
+## Etapa 6: doses e registros
+
+DoseAccessService exige AuthContext e verifica o titular da DosePrevista antes de consultar seu registro ou salvar uma acao. O novo registro recebe userId da sessao, ID gerado pelo modelo e recordedAt do relogio do servidor. Doses canceladas e registros anteriores nao sao alterados por este servico. Ausencia e dose alheia produzem a mesma excecao generica.
+
+DoseAccessServiceTest verifica dois usuarios, tentativa cruzada sem gravacao, registro proprio, dose cancelada e preservacao do registro anterior. Sao testes em memoria dos repositories existentes; a prova no MongoDB real e a integracao com o futuro endpoint de registro continuam pendentes. A politica completa de registro/correcao pertence a respectiva funcionalidade de doses.
+
