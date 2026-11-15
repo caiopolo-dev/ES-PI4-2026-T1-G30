@@ -9,6 +9,7 @@ import java.util.Map;
  * Contém method, path, rawQuery, httpVersion, headers e body.
  */
 public class HttpRequest {
+    private final backend.auth.AuthContext authContext;
     private final String method;      // Ex: "GET", "POST"
     private final String path;        // Ex: "/health", "/medications", "/doses"
     private final String rawQuery;    // Ex: "date=2026-11-05" (ou "" quando ausente)
@@ -17,6 +18,7 @@ public class HttpRequest {
     private final String body;
 
     public HttpRequest(String method, String path, String httpVersion, Map<String, String> headers, String body) {
+        this.authContext = null;
         this.method = method != null ? method.toUpperCase() : "";
         String rawTarget = path != null ? path : "";
         String[] targetParts = rawTarget.split("\\?", 2);
@@ -69,5 +71,24 @@ public class HttpRequest {
 
     public String getBody() {
         return body;
+    }
+
+    private HttpRequest(HttpRequest original, backend.auth.AuthContext context) {
+        this.method = original.method;
+        this.path = original.path;
+        this.rawQuery = original.rawQuery;
+        this.httpVersion = original.httpVersion;
+        this.headers = new HashMap<>(original.headers);
+        this.body = original.body;
+        this.authContext = java.util.Objects.requireNonNull(context);
+    }
+
+    // Cria uma copia para o handler sem alterar a requisicao original.
+    public HttpRequest withAuthContext(backend.auth.AuthContext context) {
+        return new HttpRequest(this, context);
+    }
+
+    public java.util.Optional<backend.auth.AuthContext> getAuthContext() {
+        return java.util.Optional.ofNullable(authContext);
     }
 }

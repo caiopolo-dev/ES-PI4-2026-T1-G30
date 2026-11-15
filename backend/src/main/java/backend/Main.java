@@ -1,6 +1,6 @@
 package backend;
 
-import backend.auth.InMemorySessionAuthenticator;
+import backend.auth.SessionAuthenticator;
 import backend.config.MongoConnection;
 import backend.handlers.AdherenceHandler;
 import backend.handlers.AgendaHandler;
@@ -15,14 +15,12 @@ import backend.repositories.MongoUserRepository;
 
 import backend.repositories.MongoDoseRecordRepository;
 import backend.repositories.MongoPlannedDoseRepository;
-import backend.repositories.MongoUserRepository;
 import backend.repositories.PlannedDoseRepository;
 import backend.repositories.UserRepository;
 
 import backend.router.Router;
 import backend.server.Servidor;
 
-import backend.handlers.AuthHandler;
 import backend.services.AuthService;
 
 import backend.handlers.LoginHandler;
@@ -37,9 +35,6 @@ import backend.handlers.MeHandler;
 import backend.handlers.LogoutHandler;
 import backend.services.AdherenceService;
 import backend.services.AgendaService;
-import backend.services.AuthService;
-import backend.services.MedicationService;
-import backend.services.UserService;
 
 public class Main {
 
@@ -65,9 +60,6 @@ public class Main {
         DoseRecordRepository doseRecordRepository = new MongoDoseRecordRepository();
         AgendaService agendaService = new AgendaService(plannedDoseRepository, doseRecordRepository);
         AdherenceService adherenceService = new AdherenceService(plannedDoseRepository, doseRecordRepository);
-        InMemorySessionAuthenticator sessionAuthenticator = new InMemorySessionAuthenticator();
-        AgendaHandler agendaHandler = new AgendaHandler(agendaService, sessionAuthenticator);
-        AdherenceHandler adherenceHandler = new AdherenceHandler(adherenceService, sessionAuthenticator);
 
         // Conexão com o MongoDB
         try (MongoConnection mongoConnection = new MongoConnection()) {
@@ -85,6 +77,13 @@ public class Main {
             SessionService sessionService = new SessionService(sessionRepository);
             
             BearerTokenExtractor bearerTokenExtractor = new BearerTokenExtractor();
+            // Usa a mesma sessao do login nas consultas privadas.
+            SessionAuthenticator sessionAuthenticator = request -> bearerTokenExtractor.extract(request)
+                .flatMap(sessionService::resolve)
+                .map(session -> session.getUserId());
+            AgendaHandler agendaHandler = new AgendaHandler(agendaService);
+            AdherenceHandler adherenceHandler = new AdherenceHandler(adherenceService);
+
             LoginRateLimiter loginRateLimiter = new LoginRateLimiter();
             LoginHandler loginHandler = new LoginHandler(loginService, sessionService, loginRateLimiter);
             MeHandler meHandler = new MeHandler(sessionService, userRepository, bearerTokenExtractor);
@@ -92,7 +91,7 @@ public class Main {
 
 
             // Configuração das rotas HTTP
-            Router router = new Router();
+            Router router = new Router(sessionAuthenticator);
             router.register("GET", "/health", new HealthHandler());
             router.register("GET", "/medications", medicationHandler);
             router.register("GET", "/doses", agendaHandler);

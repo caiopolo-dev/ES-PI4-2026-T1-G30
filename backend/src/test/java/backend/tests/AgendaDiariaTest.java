@@ -75,8 +75,8 @@ public class AgendaDiariaTest {
                 fixedClock,
                 Duration.ofMinutes(30));
 
-        agendaHandler = new AgendaHandler(agendaService, authenticator);
-        router = new Router();
+        agendaHandler = new AgendaHandler(agendaService);
+        router = new Router(authenticator);
         router.register("GET", "/doses", agendaHandler);
     }
 

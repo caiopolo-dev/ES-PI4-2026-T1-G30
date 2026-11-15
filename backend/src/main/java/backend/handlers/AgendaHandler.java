@@ -1,6 +1,5 @@
 package backend.handlers;
 
-import backend.auth.SessionAuthenticator;
 import backend.http.HttpRequest;
 import backend.http.HttpResponse;
 import backend.models.DailyAgendaItem;
@@ -30,19 +29,16 @@ import java.util.StringJoiner;
 public class AgendaHandler implements HttpHandler {
 
     private final AgendaService agendaService;
-    private final SessionAuthenticator sessionAuthenticator;
 
-    public AgendaHandler(AgendaService agendaService, SessionAuthenticator sessionAuthenticator) {
+    public AgendaHandler(AgendaService agendaService) {
         this.agendaService = Objects.requireNonNull(agendaService, "agendaService não pode ser null");
-        this.sessionAuthenticator = Objects.requireNonNull(
-                sessionAuthenticator, "sessionAuthenticator não pode ser null");
     }
 
     @Override
     public HttpResponse handle(HttpRequest request) {
         try {
             // 1. Verificar autenticação da sessão
-            Optional<String> authenticatedUserIdOpt = sessionAuthenticator.resolveAuthenticatedUserId(request);
+            Optional<String> authenticatedUserIdOpt = request.getAuthContext().map(context -> context.userId());
             if (authenticatedUserIdOpt.isEmpty()) {
                 return HttpResponse.unauthorized("Invalid, expired, or missing session");
             }

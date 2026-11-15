@@ -1,6 +1,5 @@
 package backend.handlers;
 
-import backend.auth.SessionAuthenticator;
 import backend.http.HttpRequest;
 import backend.http.HttpResponse;
 import backend.models.AdherenceSummary;
@@ -21,18 +20,15 @@ import java.util.Optional;
 public class AdherenceHandler implements HttpHandler {
 
     private final AdherenceService adherenceService;
-    private final SessionAuthenticator sessionAuthenticator;
 
-    public AdherenceHandler(AdherenceService adherenceService, SessionAuthenticator sessionAuthenticator) {
+    public AdherenceHandler(AdherenceService adherenceService) {
         this.adherenceService = Objects.requireNonNull(adherenceService, "adherenceService não pode ser null");
-        this.sessionAuthenticator = Objects.requireNonNull(
-                sessionAuthenticator, "sessionAuthenticator não pode ser null");
     }
 
     @Override
     public HttpResponse handle(HttpRequest request) {
         try {
-            Optional<String> authenticatedUserIdOpt = sessionAuthenticator.resolveAuthenticatedUserId(request);
+            Optional<String> authenticatedUserIdOpt = request.getAuthContext().map(context -> context.userId());
             if (authenticatedUserIdOpt.isEmpty()) {
                 return HttpResponse.unauthorized("Invalid, expired, or missing session");
             }

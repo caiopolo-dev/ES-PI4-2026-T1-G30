@@ -12,6 +12,16 @@ import java.util.Map;
  * com base no método HTTP (GET, POST, etc.) e no caminho (path).
  */
 public class Router {
+    private final backend.auth.SessionAuthenticator authenticator;
+
+    public Router() {
+        this(request -> java.util.Optional.empty());
+    }
+
+    public Router(backend.auth.SessionAuthenticator authenticator) {
+        this.authenticator = java.util.Objects.requireNonNull(authenticator);
+    }
+
 
     // Mapa que relaciona: path -> (method -> HttpHandler)
     // Ex: "/health" -> { "GET" -> HealthHandler }
@@ -51,6 +61,17 @@ public class Router {
         }
 
         // 3. Delega o processamento para o handler correspondente
+        if (RouteAccessPolicy.requiresAuthentication(method, path)) {
+            try {
+                var userId = authenticator.resolveAuthenticatedUserId(request);
+                if (userId.isEmpty() || userId.get().isBlank()) {
+                    return HttpResponse.unauthorized("Invalid, expired, or missing session");
+                }
+                return handler.handle(request.withAuthContext(new backend.auth.AuthContext(userId.get())));
+            } catch (RuntimeException error) {
+                return HttpResponse.internalServerError("Internal server error");
+            }
+        }
         return handler.handle(request);
     }
 }
