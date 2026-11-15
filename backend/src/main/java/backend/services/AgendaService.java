@@ -137,7 +137,7 @@ public class AgendaService {
             plannedDoseIds.add(dose.getId());
         }
         Map<String, RegistroDeDose> recordsByDoseId =
-                doseRecordRepository.findByPlannedDoseIds(plannedDoseIds);
+                doseRecordRepository.findByPlannedDoseIdsAndUserId(plannedDoseIds, normalizedUserId);
 
         Instant now = clock.instant();
         List<DailyAgendaItem> items = new ArrayList<>(validScheduledDoses.size());

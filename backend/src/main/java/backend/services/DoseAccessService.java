@@ -9,7 +9,7 @@ import backend.repositories.DoseRecordRepository;
 import backend.repositories.PlannedDoseRepository;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.NoSuchElementException;
+import backend.auth.ResourceNotFoundException;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -58,7 +58,7 @@ public final class DoseAccessService {
         return records.save(record);
     }
 
-    private static NoSuchElementException notFound() {
-        return new NoSuchElementException("Recurso nao encontrado.");
+    private static ResourceNotFoundException notFound() {
+        return new ResourceNotFoundException();
     }
 }

@@ -1,5 +1,6 @@
 package backend.router;
 
+import backend.auth.AccessAudit;
 import backend.http.HttpRequest;
 import backend.http.HttpResponse;
 
@@ -65,13 +66,34 @@ public class Router {
             try {
                 var userId = authenticator.resolveAuthenticatedUserId(request);
                 if (userId.isEmpty() || userId.get().isBlank()) {
+                    AccessAudit.record(AccessAudit.Event.AUTHENTICATION_REQUIRED);
                     return HttpResponse.unauthorized("Invalid, expired, or missing session");
                 }
-                return handler.handle(request.withAuthContext(new backend.auth.AuthContext(userId.get())));
+                return execute(handler, request.withAuthContext(new backend.auth.AuthContext(userId.get())));
             } catch (RuntimeException error) {
                 return HttpResponse.internalServerError("Internal server error");
             }
         }
-        return handler.handle(request);
+        return execute(handler, request);
+    }
+
+    private HttpResponse execute(HttpHandler handler, HttpRequest request) {
+        try {
+            HttpResponse response = handler.handle(request);
+            if (response.getStatusCode() == 401) {
+                AccessAudit.record(AccessAudit.Event.AUTHENTICATION_REQUIRED);
+            } else if (response.getStatusCode() == 403) {
+                AccessAudit.record(AccessAudit.Event.PERMISSION_DENIED);
+            }
+            return response;
+        } catch (backend.auth.ResourceNotFoundException error) {
+            AccessAudit.record(AccessAudit.Event.RESOURCE_UNAVAILABLE);
+            return HttpResponse.notFound("Recurso nao encontrado.");
+        } catch (backend.auth.AccessDeniedException error) {
+            AccessAudit.record(AccessAudit.Event.PERMISSION_DENIED);
+            return HttpResponse.forbidden("Acesso negado.");
+        } catch (RuntimeException error) {
+            return HttpResponse.internalServerError("Internal server error");
+        }
     }
 }

@@ -54,3 +54,24 @@ DoseAccessService exige AuthContext e verifica o titular da DosePrevista antes d
 
 DoseAccessServiceTest verifica dois usuarios, tentativa cruzada sem gravacao, registro proprio, dose cancelada e preservacao do registro anterior. Sao testes em memoria dos repositories existentes; a prova no MongoDB real e a integracao com o futuro endpoint de registro continuam pendentes. A politica completa de registro/correcao pertence a respectiva funcionalidade de doses.
 
+
+## Etapa 7: agenda, indicadores e historico
+
+AgendaService e AdherenceService agora usam findByPlannedDoseIdsAndUserId. A consulta em lote retorna apenas registros do titular e das doses solicitadas, conferindo o vinculo plannedDoseId. Os filtros de titularidade das doses e as verificacoes defensivas existentes foram preservados. DoseRecordOwnershipTest cobre dois usuarios e ausencia de identidade, sem alterar os dados.
+
+A filtragem desta implementacao ocorre sobre os registros retornados pelo repository existente em memoria, nao em uma consulta MongoDB real. O endpoint/servico de historico ainda nao existe nesta branch; sua protecao depende da integracao da issue #35. Nao foi criado um historico paralelo.
+
+
+## Etapa 8: respostas de erro
+
+O Router traduz ResourceNotFoundException em 404 generico (recurso inexistente ou alheio), AccessDeniedException em 403 generico e falhas inesperadas em 500 sem detalhes internos. Sessoes ausentes/invalidas permanecem 401. TreatmentAccessService e DoseAccessService usam ResourceNotFoundException, sem distinguir recurso inexistente de alheio. Apenas as excecoes especificas sao traduzidas; NoSuchElementException inesperada nao e tratada como negacao de acesso.
+
+403 fica disponivel para permissoes explicitamente negadas; nao foram adicionados papeis ou regras administrativas. Os futuros handlers devem deixar essas excecoes chegarem ao Router. Os testes usam handlers de teste para comprovar a traducao, pois os endpoints de tratamentos e registro de doses ainda estao pendentes.
+
+
+## Etapa 9: logs de acesso negado
+
+AccessAudit usa java.util.logging e registra somente nomes fixos de eventos: AUTHENTICATION_REQUIRED (401), PERMISSION_DENIED (403) e RESOURCE_UNAVAILABLE (excecao de recurso ausente/alheio convertida em 404). O ultimo evento nao distingue inexistencia de acesso cruzado. Respostas 401/403 produzidas pelos handlers tambem sao registradas; rotas desconhecidas nao geram eventos de titularidade.
+
+Nao sao incluidos token, corpo, query, caminho, IDs, dados de tratamento, mensagens de excecao ou stack traces. AccessAuditTest captura os eventos e verifica mensagens fixas, ausencia de parametros/excecoes e ausencia de evento em acesso permitido. A saida usa os handlers de logging configurados no Java, sem nova dependencia.
+
