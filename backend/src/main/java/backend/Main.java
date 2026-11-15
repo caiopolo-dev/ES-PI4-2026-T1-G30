@@ -10,13 +10,31 @@ import backend.handlers.MedicationHandler;
 import backend.repositories.DoseRecordRepository;
 import backend.repositories.InMemoryMedicationRepository;
 import backend.repositories.MedicationRepository;
+import backend.services.MedicationService;
+import backend.repositories.MongoUserRepository;
+
 import backend.repositories.MongoDoseRecordRepository;
 import backend.repositories.MongoPlannedDoseRepository;
 import backend.repositories.MongoUserRepository;
 import backend.repositories.PlannedDoseRepository;
 import backend.repositories.UserRepository;
+
 import backend.router.Router;
 import backend.server.Servidor;
+
+import backend.handlers.AuthHandler;
+import backend.services.AuthService;
+
+import backend.handlers.LoginHandler;
+import backend.services.LoginService;
+
+import backend.repositories.SessionRepository;
+import backend.repositories.MongoSessionRepository;
+import backend.services.SessionService;
+import backend.services.BearerTokenExtractor;
+import backend.services.LoginRateLimiter;
+import backend.handlers.MeHandler;
+import backend.handlers.LogoutHandler;
 import backend.services.AdherenceService;
 import backend.services.AgendaService;
 import backend.services.AuthService;
@@ -60,6 +78,19 @@ public class Main {
             AuthService authService = new AuthService(userRepository);
             AuthHandler authHandler = new AuthHandler(authService);
 
+            
+            LoginService loginService = new LoginService(userRepository);
+            // Configuração das sessões
+            SessionRepository sessionRepository = new MongoSessionRepository(mongoConnection.getCollection("auth_sessions"));
+            SessionService sessionService = new SessionService(sessionRepository);
+            
+            BearerTokenExtractor bearerTokenExtractor = new BearerTokenExtractor();
+            LoginRateLimiter loginRateLimiter = new LoginRateLimiter();
+            LoginHandler loginHandler = new LoginHandler(loginService, sessionService, loginRateLimiter);
+            MeHandler meHandler = new MeHandler(sessionService, userRepository, bearerTokenExtractor);
+            LogoutHandler logoutHandler = new LogoutHandler(sessionService, bearerTokenExtractor);
+
+
             // Configuração das rotas HTTP
             Router router = new Router();
             router.register("GET", "/health", new HealthHandler());
@@ -67,6 +98,9 @@ public class Main {
             router.register("GET", "/doses", agendaHandler);
             router.register("GET", "/adherence/summary", adherenceHandler);
             router.register("POST", "/auth/register", authHandler);
+            router.register("POST", "/auth/login", loginHandler);
+            router.register("GET", "/auth/me", meHandler);
+            router.register("POST", "/auth/logout", logoutHandler);
 
             // Inicialização do servidor
             Servidor servidor = new Servidor(porta, router);
