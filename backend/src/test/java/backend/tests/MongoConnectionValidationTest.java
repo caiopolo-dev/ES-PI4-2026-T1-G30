@@ -51,6 +51,10 @@ public class MongoConnectionValidationTest {
         });
         assertTrue(error.getMessage().contains(expectedMessage));
         assertFalse(error.getMessage().contains("secret"));
-        assertNull(error.getCause());
+        if (expectedMessage.equals("Não foi possível conectar")) {
+            assertNotNull(error.getCause());
+        } else {
+            assertNull(error.getCause());
+        }
     }
 }
