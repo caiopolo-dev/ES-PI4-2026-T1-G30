@@ -89,7 +89,7 @@ public class TreatmentPersistenceTest {
         check("med-x".equals(recoveredMed.getId()), "ID do medicamento em uso deve permanecer");
         check("Medicamento X".equals(recoveredMed.getName()), "Nome do medicamento deve permanecer");
         check("1 unidade".equals(recoveredMed.getDose()), "Dose '1 unidade' deve permanecer");
-        check(Integer.valueOf(1).equals(recoveredMed.getQuantity()), "Quantidade deve permanecer 1");
+        check(new java.math.BigDecimal("1").equals(recoveredMed.getQuantity()), "Quantidade deve permanecer 1");
         check("Tomar após as refeições".equals(recoveredMed.getObservations()), "Observações devem permanecer");
 
         // 3. Cronograma permanece associado
@@ -160,7 +160,7 @@ public class TreatmentPersistenceTest {
         Treatment afterV3 = repository.findById("trat-hist").get();
         MedicamentoEmUso medAfterV3 = afterV3.getMedications().get(0);
         check(medAfterV3.getSchedules().size() == 3, "Histórico deve conter 3 versões (v1, v2 e v3)");
-        check(Integer.valueOf(2).equals(medAfterV3.getQuantity()), "Quantidade atualizada deve ser persistida");
+        check(new java.math.BigDecimal("2").equals(medAfterV3.getQuantity()), "Quantidade atualizada deve ser persistida");
         check(!medAfterV3.getScheduleByVersion(1).get().isActive(), "v1 permanece inativa");
         check(!medAfterV3.getScheduleByVersion(2).get().isActive(), "v2 passa a ficar inativa");
 

@@ -205,7 +205,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         incomingMed.getName(),
                         incomingMed.getDose(),
                         incomingMed.getQuantity(),
+                        incomingMed.getUnit(),
                         incomingMed.getObservations(),
+                        incomingMed.isActive(),
                         mergedSchedules
                 ));
             }
@@ -316,6 +318,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
             medDoc.put("name", med.getName());
             medDoc.put("dose", med.getDose());
             medDoc.put("quantity", med.getQuantity());
+            medDoc.put("unit", med.getUnit());
+            medDoc.put("active", med.isActive());
             medDoc.put("observations", med.getObservations());
 
             List<Map<String, Object>> scheduleDocs = new ArrayList<>();
@@ -362,9 +366,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 String medId = (String) medDoc.get("id");
                 String medName = (String) medDoc.get("name");
                 String dose = (String) medDoc.get("dose");
-                Integer quantity = medDoc.get("quantity") instanceof Number
-                        ? ((Number) medDoc.get("quantity")).intValue()
-                        : null;
+                java.math.BigDecimal quantity = medDoc.get("quantity") instanceof Number
+                        ? new java.math.BigDecimal(medDoc.get("quantity").toString()) : null;
                 String observations = (String) medDoc.get("observations");
 
                 List<CronogramaDose> schedules = new ArrayList<>();
@@ -400,7 +403,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         medName,
                         dose,
                         quantity,
+                        (String) medDoc.get("unit"),
                         observations,
+                        !Boolean.FALSE.equals(medDoc.get("active")),
                         schedules
                 ));
             }

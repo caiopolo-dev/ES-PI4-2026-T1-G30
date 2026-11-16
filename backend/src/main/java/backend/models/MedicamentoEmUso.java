@@ -1,5 +1,6 @@
 package backend.models;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,7 +18,9 @@ public class MedicamentoEmUso {
     private final String id;
     private String name;
     private String dose;
-    private Integer quantity;
+    private BigDecimal quantity;
+    private String unit;
+    private boolean active;
     private String observations;
     private final List<CronogramaDose> schedules;
 
@@ -28,32 +31,23 @@ public class MedicamentoEmUso {
             Integer quantity,
             String observations,
             List<CronogramaDose> schedules) {
-        Objects.requireNonNull(name, "name não pode ser null");
-        if (name.trim().isEmpty()) {
-            throw new IllegalArgumentException("name do medicamento não pode ser vazio");
-        }
-        Objects.requireNonNull(dose, "dose não pode ser null");
-        if (dose.trim().isEmpty()) {
-            throw new IllegalArgumentException("dose do medicamento não pode ser vazia");
-        }
-        if (quantity != null && quantity < 0) {
-            throw new IllegalArgumentException("quantity não pode ser negativa");
-        }
+        this(id, name, dose, quantity == null ? null : BigDecimal.valueOf(quantity),
+            null, observations, true, schedules);
+    }
 
-        this.id = (id == null || id.trim().isEmpty())
-                ? UUID.randomUUID().toString()
-                : id.trim();
-        this.name = name.trim();
-        this.dose = dose.trim();
-        this.quantity = quantity;
-        this.observations = observations != null ? observations.trim() : null;
+    public MedicamentoEmUso(String id, String name, String dose, BigDecimal quantity,
+            String unit, String observations, boolean active, List<CronogramaDose> schedules) {
+        this.id = id == null || id.isBlank() ? UUID.randomUUID().toString() : id.trim();
+        setName(name);
+        setDose(dose);
+        setQuantity(quantity);
+        setUnit(unit);
+        setObservations(observations);
+        this.active = active;
         this.schedules = new ArrayList<>();
-
         if (schedules != null) {
             for (CronogramaDose schedule : schedules) {
-                if (schedule != null) {
-                    this.schedules.add(schedule);
-                }
+                if (schedule != null) { this.schedules.add(schedule); }
             }
         }
     }
@@ -101,42 +95,53 @@ public class MedicamentoEmUso {
     }
 
     public void setName(String name) {
-        Objects.requireNonNull(name, "name não pode ser null");
-        if (name.trim().isEmpty()) {
-            throw new IllegalArgumentException("name do medicamento não pode ser vazio");
-        }
-        this.name = name.trim();
+        this.name = optionalText(name, 200);
     }
 
-    public String getDose() {
-        return dose;
-    }
+    public String getDose() { return dose; }
 
     public void setDose(String dose) {
-        Objects.requireNonNull(dose, "dose não pode ser null");
-        if (dose.trim().isEmpty()) {
-            throw new IllegalArgumentException("dose do medicamento não pode ser vazia");
+        this.dose = optionalText(dose, 200);
+    }
+
+    public BigDecimal getQuantity() { return quantity; }
+
+    public void setQuantity(BigDecimal quantity) {
+        if (quantity != null && quantity.signum() <= 0) {
+            throw new IllegalArgumentException("Quantidade deve ser positiva.");
         }
-        this.dose = dose.trim();
+        this.quantity = quantity == null ? null : quantity.stripTrailingZeros();
     }
 
-    public Integer getQuantity() {
-        return quantity;
-    }
+    // Mantem chamadas antigas com quantidades inteiras.
+    public void setQuantity(int quantity) { setQuantity(BigDecimal.valueOf(quantity)); }
 
-    public void setQuantity(Integer quantity) {
-        if (quantity != null && quantity < 0) {
-            throw new IllegalArgumentException("quantity não pode ser negativa");
-        }
-        this.quantity = quantity;
-    }
+    public String getUnit() { return unit; }
+    public void setUnit(String unit) { this.unit = optionalText(unit, 50); }
+    public boolean isActive() { return active; }
 
-    public String getObservations() {
-        return observations;
-    }
+    // Nao apaga cronogramas nem muda a identidade.
+    public void deactivate() { this.active = false; }
 
+    public String getObservations() { return observations; }
     public void setObservations(String observations) {
-        this.observations = observations != null ? observations.trim() : null;
+        this.observations = optionalText(observations, 2000);
+    }
+
+    // O servico chama esta validacao antes de ativar um medicamento no tratamento.
+    public void validateForActivation() {
+        if (name == null || dose == null || quantity == null || unit == null) {
+            throw new IllegalStateException("Medicamento incompleto para ativacao.");
+        }
+    }
+
+    private static String optionalText(String text, int maxLength) {
+        if (text == null || text.isBlank()) { return null; }
+        String normalized = text.trim();
+        if (normalized.length() > maxLength) {
+            throw new IllegalArgumentException("Texto excede o tamanho permitido.");
+        }
+        return normalized;
     }
 
     /**
@@ -266,13 +271,15 @@ public class MedicamentoEmUso {
                 && Objects.equals(name, that.name)
                 && Objects.equals(dose, that.dose)
                 && Objects.equals(quantity, that.quantity)
+                && Objects.equals(unit, that.unit)
+                && active == that.active
                 && Objects.equals(observations, that.observations)
                 && Objects.equals(schedules, that.schedules);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, dose, quantity, observations, schedules);
+        return Objects.hash(id, name, dose, quantity, unit, active, observations, schedules);
     }
 
     @Override
