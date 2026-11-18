@@ -1,43 +1,58 @@
 package backend.models;
 
 import java.time.Instant;
-import java.util.Objects;
-import java.util.UUID;
 
-/**
- * Representa uma ação explícita do usuário sobre uma DosePrevista (collection dose_records).
- * A ausência de ação na agenda diária é representada pela inexistência de um RegistroDeDose,
- * nunca por um registro automático de SKIPPED.
- */
+// Representa uma ação explícita do usuário sobre uma DosePrevista.
+// Registra se o medicamento foi tomado (TAKEN) ou ignorado (SKIPPED),
+// armazenando os horários necessários para construir o histórico de adesão.
+// A ausência de registro não significa que a dose foi ignorada.
+
 public class RegistroDeDose {
+
+    public static final String TAKEN = "TAKEN";
+    public static final String SKIPPED = "SKIPPED";
+
     private final String id;
     private final String plannedDoseId;
-    private final String userId;
-    private final DoseAction action;
+    private final String action;
     private final Instant actualTime;
     private final Instant recordedAt;
 
     public RegistroDeDose(
             String id,
             String plannedDoseId,
-            String userId,
-            DoseAction action,
+            String action,
             Instant actualTime,
             Instant recordedAt) {
-        Objects.requireNonNull(plannedDoseId, "plannedDoseId não pode ser null");
-        if (plannedDoseId.trim().isEmpty()) {
-            throw new IllegalArgumentException("plannedDoseId não pode ser vazio");
-        }
-        Objects.requireNonNull(userId, "userId não pode ser null");
-        if (userId.trim().isEmpty()) {
-            throw new IllegalArgumentException("userId não pode ser vazio");
-        }
-        Objects.requireNonNull(action, "action não pode ser null");
-        Objects.requireNonNull(recordedAt, "recordedAt não pode ser null");
 
-        this.id = (id == null || id.trim().isEmpty()) ? UUID.randomUUID().toString() : id.trim();
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("ID do registro inválido");
+        }
+
+        if (plannedDoseId == null || plannedDoseId.isBlank()) {
+            throw new IllegalArgumentException("ID da dose prevista inválido");
+        }
+
+        if (!TAKEN.equals(action) && !SKIPPED.equals(action)) {
+            throw new IllegalArgumentException("Ação inválida");
+        }
+
+        if (recordedAt == null) {
+            throw new IllegalArgumentException("Horário do registro não pode ser null");
+        }
+
+        // Se tomou, precisamos saber quando
+        if (TAKEN.equals(action) && actualTime == null) {
+            throw new IllegalArgumentException("TAKEN precisa de actualTime");
+        }
+
+        // Se não tomou, não existe horário de ingestão
+        if (SKIPPED.equals(action) && actualTime != null) {
+            throw new IllegalArgumentException("SKIPPED não deve ter actualTime");
+        }
+
+        this.id = id.trim();
         this.plannedDoseId = plannedDoseId.trim();
-        this.userId = userId.trim();
         this.action = action;
         this.actualTime = actualTime;
         this.recordedAt = recordedAt;
@@ -51,11 +66,7 @@ public class RegistroDeDose {
         return plannedDoseId;
     }
 
-    public String getUserId() {
-        return userId;
-    }
-
-    public DoseAction getAction() {
+    public String getAction() {
         return action;
     }
 

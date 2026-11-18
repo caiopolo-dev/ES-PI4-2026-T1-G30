@@ -1,104 +1,136 @@
 package backend.repositories;
 
-import backend.models.DoseAction;
 import backend.models.RegistroDeDose;
+
 import java.time.Instant;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
-/**
- * Implementação de DoseRecordRepository alinhada à modelagem física da collection dose_records no MongoDB.
- * Garante a restrição unique(plannedDoseId) e suporta consulta em lote (findByPlannedDoseIds)
- * para evitar o problema de N+1 queries ao montar a agenda diária.
- */
-public class MongoDoseRecordRepository implements DoseRecordRepository {
+// IMPORT DAS CLASSES QUE COMUNICAM COM O MONGO
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.ReturnDocument;
+import org.bson.Document;
 
-    public static final String DEFAULT_COLLECTION = "dose_records";
+import java.util.Date;
 
-    // Armazenamento de documentos (_id -> Document Map)
-    private final Map<String, Map<String, Object>> documentCollection = new LinkedHashMap<>();
-    // Índice único: plannedDoseId -> _id
-    private final Map<String, String> uniquePlannedDoseIndex = new LinkedHashMap<>();
+public class MongoDoseRecordRepository implements DoseRecordRepository{
 
-    @Override
-    public synchronized RegistroDeDose save(RegistroDeDose registroDeDose) {
-        Objects.requireNonNull(registroDeDose, "registroDeDose não pode ser null");
+    private final MongoCollection<Document> collection;
 
-        String existingDocId = uniquePlannedDoseIndex.get(registroDeDose.getPlannedDoseId());
-        if (existingDocId != null && !existingDocId.equals(registroDeDose.getId())) {
-            throw new IllegalStateException(
-                    "Já existe um registro ativo para a dose prevista: " + registroDeDose.getPlannedDoseId());
+    // Construtor: recebe o MongoDatabase e seleciona a collection de registros
+    public MongoDoseRecordRepository(MongoDatabase database) {
+        if (database == null) {
+            throw new IllegalArgumentException("Database não pode ser null");
         }
 
-        Map<String, Object> doc = toDocument(registroDeDose);
-        String id = (String) doc.get("_id");
-        documentCollection.put(id, doc);
-        uniquePlannedDoseIndex.put(registroDeDose.getPlannedDoseId(), id);
+        this.collection = database.getCollection("dose_records");
 
-        return fromDocument(doc);
+        // Cria um índice único para impedir mais de um registro por dose prevista
+        collection.createIndex(
+                new Document("plannedDoseId", 1),
+                new IndexOptions().unique(true)
+        );
     }
 
-    @Override
-    public synchronized Optional<RegistroDeDose> findByPlannedDoseId(String plannedDoseId) {
-        if (plannedDoseId == null || plannedDoseId.trim().isEmpty()) {
-            return Optional.empty();
-        }
-        String docId = uniquePlannedDoseIndex.get(plannedDoseId.trim());
-        if (docId == null) {
-            return Optional.empty();
-        }
-        Map<String, Object> doc = documentCollection.get(docId);
-        return doc != null ? Optional.of(fromDocument(doc)) : Optional.empty();
-    }
 
-    @Override
-    public synchronized Map<String, RegistroDeDose> findByPlannedDoseIds(Collection<String> plannedDoseIds) {
-        if (plannedDoseIds == null || plannedDoseIds.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<String, RegistroDeDose> result = new LinkedHashMap<>();
-        for (String plannedDoseId : plannedDoseIds) {
-            if (plannedDoseId != null) {
-                String docId = uniquePlannedDoseIndex.get(plannedDoseId.trim());
-                if (docId != null) {
-                    Map<String, Object> doc = documentCollection.get(docId);
-                    if (doc != null) {
-                        result.put(plannedDoseId.trim(), fromDocument(doc));
-                    }
-                }
-            }
-        }
-        return result;
-    }
+    // Método auxiliar, igual usei em MongoPlannedDoseRepository
+    // Converte um documento do MongoDB para um objeto RegistroDeDose
+    private RegistroDeDose fromDocument(Document doc) {
+        Date actualTime = doc.getDate("actualTime");
 
-    @Override
-    public synchronized int countAll() {
-        return documentCollection.size();
-    }
-
-    private Map<String, Object> toDocument(RegistroDeDose record) {
-        Map<String, Object> doc = new LinkedHashMap<>();
-        doc.put("_id", record.getId());
-        doc.put("plannedDoseId", record.getPlannedDoseId());
-        doc.put("userId", record.getUserId());
-        doc.put("action", record.getAction().name());
-        doc.put("actualTime", record.getActualTime() != null ? record.getActualTime().toString() : null);
-        doc.put("recordedAt", record.getRecordedAt().toString());
-        return doc;
-    }
-
-    private RegistroDeDose fromDocument(Map<String, Object> doc) {
-        String actualTimeStr = (String) doc.get("actualTime");
         return new RegistroDeDose(
-                (String) doc.get("_id"),
-                (String) doc.get("plannedDoseId"),
-                (String) doc.get("userId"),
-                DoseAction.valueOf((String) doc.get("action")),
-                actualTimeStr != null ? Instant.parse(actualTimeStr) : null,
-                Instant.parse((String) doc.get("recordedAt")));
+                doc.getString("_id"),
+                doc.getString("plannedDoseId"),
+                doc.getString("action"),
+                actualTime != null ? actualTime.toInstant() : null,  // verifica se existe um horário registrado,
+                //se existir, converte de Date para Instant, se não existir, retorna null
+                doc.getDate("recordedAt").toInstant()
+        );
+    }
+
+    @Override
+    public RegistroDeDose save(RegistroDeDose registro) {
+        if (registro == null) {
+            throw new IllegalArgumentException("Registro não pode ser null");
+        }
+
+        // Identifica o registro pela dose prevista associada
+        Document filtro = new Document("plannedDoseId", registro.getPlannedDoseId());
+
+        // Monta o documento que será armazenado no MongoDB
+        Document documento = new Document("_id", registro.getId())
+                .append("plannedDoseId", registro.getPlannedDoseId())
+                .append("action", registro.getAction())
+                .append("actualTime", registro.getActualTime() != null
+                        ? Date.from(registro.getActualTime()) : null)
+                .append("recordedAt", Date.from(registro.getRecordedAt()));
+
+        // Insere o registro somente se ainda não existir
+        Document salvo = collection.findOneAndUpdate(
+                filtro, // Localiza pelo ID da dose prevista
+                new Document("$setOnInsert", documento), // Insere sem sobrescrever registros existentes
+                new FindOneAndUpdateOptions()
+                        .upsert(true) // Insere caso não encontre o registro
+                        .returnDocument(ReturnDocument.AFTER) // Retorna o documento armazenado
+        );
+
+        RegistroDeDose resultado = fromDocument(salvo);
+
+        // Impede que uma dose já registrada receba uma ação contraditória
+        if (!resultado.getAction().equals(registro.getAction())) {
+            throw new IllegalStateException("Esta dose já possui um registro com outra ação");
+        }
+
+        return resultado;
+    }
+
+    @Override
+    public Optional<RegistroDeDose> findByPlannedDoseId(String plannedDoseId) {
+        if (plannedDoseId == null || plannedDoseId.isBlank()) {
+            throw new IllegalArgumentException("ID da dose prevista não pode ser nulo ou vazio");
+        }
+
+        // Busca o primeiro registro associado ao ID da dose prevista
+        Document documento = collection.find(
+                new Document("plannedDoseId", plannedDoseId)
+        ).first();
+
+        // Se não encontrou nenhum registro, retorna um Optional vazio
+        if (documento == null) {
+            return Optional.empty();
+        }
+
+        // Converte o documento para RegistroDeDose e retorna dentro do Optional
+        return Optional.of(fromDocument(documento));
+    }
+
+    @Override
+    public List<RegistroDeDose> findByPeriod(Instant inicio, Instant fim) {
+        if (inicio == null || fim == null) {
+            throw new IllegalArgumentException("O período deve ser válido");
+        }
+
+        if (!inicio.isBefore(fim)) {
+            throw new IllegalArgumentException("O início deve ser anterior ao fim");
+        }
+
+        // Filtra os registros realizados dentro do período informado
+        // MongoDB utiliza o tipo BSON Date para armazenar datas
+        Document filtro = new Document("recordedAt",
+                new Document("$gte", Date.from(inicio)) // from() recebe um Instant e devolve um Date que representa o mesmo instante
+                        .append("$lt", Date.from(fim)));
+
+        List<RegistroDeDose> registros = new ArrayList<>();
+
+        // Percorre os documentos encontrados e os converte para RegistroDeDose
+        for (Document documento : collection.find(filtro)) {
+            registros.add(fromDocument(documento));
+        }
+
+        return registros;
     }
 }
