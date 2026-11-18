@@ -2,6 +2,11 @@ package backend.models;
 
 import java.time.Instant;
 
+// Representa uma ação explícita do usuário sobre uma DosePrevista.
+// Registra se o medicamento foi tomado (TAKEN) ou ignorado (SKIPPED),
+// armazenando os horários necessários para construir o histórico de adesão.
+// A ausência de registro não significa que a dose foi ignorada.
+
 public class RegistroDeDose {
 
     public static final String TAKEN = "TAKEN";

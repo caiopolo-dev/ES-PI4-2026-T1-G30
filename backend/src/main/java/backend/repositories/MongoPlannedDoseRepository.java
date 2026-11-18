@@ -172,8 +172,9 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
         }
 
         // Filtra as doses do tratamento dentro do período informado
+        // MongoDB utiliza o tipo BSON Date para armazenar datas
         Document filtro = new Document("treatmentId", treatmentId)
-                .append("scheduledAt", new Document("$gte", Date.from(inicio))
+                .append("scheduledAt", new Document("$gte", Date.from(inicio)) // from() recebe um Instant e devolve um Date que representa o mesmo instante
                         .append("$lt", Date.from(fim)));
 
         List<DosePrevista> doses = new ArrayList<>();

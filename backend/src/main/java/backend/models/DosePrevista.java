@@ -2,6 +2,11 @@ package backend.models;
 
 import java.time.Instant;
 
+// Representa uma ocorrência concreta de administração de um medicamento,
+// gerada a partir de um CronogramaDose.
+// Armazena quando e quanto deve ser tomado, permitindo organizar a agenda
+// e acompanhar as doses previstas de um tratamento.
+
 public class DosePrevista {
 
     public static final String SCHEDULED = "SCHEDULED";
