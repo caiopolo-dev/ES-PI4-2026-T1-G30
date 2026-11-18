@@ -129,4 +129,35 @@ public class HttpResponseWriterTest {
                 "Separação entre headers e body incorreta");
     }
 
+    @Test
+    void writesValidNoContentResponse() throws IOException {
+        HttpResponse response = new HttpResponse(204, "No Content", "");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        new HttpResponseWriter().write(output, response);
+
+        String result = output.toString(StandardCharsets.UTF_8);
+        assertTrue(result.startsWith("HTTP/1.1 204 No Content\r\n"));
+        assertTrue(result.contains("Content-Length: 0\r\n"));
+        assertTrue(result.endsWith("\r\n\r\n"));
+    }
+
+    @Test
+    void writesValidUnauthorizedResponse() throws IOException {
+        HttpResponse response = new HttpResponse(
+            401,
+            "Unauthorized",
+            "{\"error\":\"Autenticação necessária.\"}"
+        );
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        new HttpResponseWriter().write(output, response);
+
+        String result = output.toString(StandardCharsets.UTF_8);
+        int bodyLength = response.getBody().getBytes(StandardCharsets.UTF_8).length;
+        assertTrue(result.startsWith("HTTP/1.1 401 Unauthorized\r\n"));
+        assertTrue(result.contains("Content-Length: " + bodyLength + "\r\n"));
+        assertTrue(result.endsWith("\r\n\r\n" + response.getBody()));
+    }
+
 } 
