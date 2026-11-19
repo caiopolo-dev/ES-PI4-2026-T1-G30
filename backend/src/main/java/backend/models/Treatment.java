@@ -94,10 +94,23 @@ public class Treatment {
         if (medications != null) {
             for (MedicamentoEmUso medication : medications) {
                 if (medication != null) {
-                    this.medications.add(medication);
+                    this.medications.add(copiarMedicamento(medication));
                 }
             }
         }
+
+
+        // Valida os tratamentos ativos reconstruídos do banco
+        if (status == TreatmentStatus.ACTIVE) {
+            validarDadosAtivacao();
+        }
+
+        // Tratamentos encerrados devem possuir uma data inicial
+        if (status == TreatmentStatus.CLOSED && startDate == null) {
+            throw new IllegalArgumentException(
+                    "Tratamento encerrado deve possuir data inicial");
+        }
+
     }
 
 
@@ -164,24 +177,86 @@ public class Treatment {
         this.description = description != null ? description.trim() : null;
     }
 
-
     public List<MedicamentoEmUso> getMedications() {
-        return Collections.unmodifiableList(medications);
+
+        // Retorna cópias para evitar alterações nos objetos originais
+        List<MedicamentoEmUso> copia = new ArrayList<>();
+
+        for (MedicamentoEmUso medication : medications) {
+            copia.add(copiarMedicamento(medication));
+        }
+
+        return Collections.unmodifiableList(copia);
     }
 
-    public void addMedication(MedicamentoEmUso medication) {
-        // Não permite incluir ou atualizar medicamentos em tratamentos encerrados
-        validarAlteracao();
+    // Verifica se uma atualização preserva as versões anteriores
+    private void validarHistorico(
+            MedicamentoEmUso anterior,
+            MedicamentoEmUso atualizado) {
 
+        for (CronogramaDose antigo : anterior.getSchedules()) {
+
+            CronogramaDose novo = atualizado
+                    .getScheduleByVersion(antigo.getVersion())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Não é permitido apagar versões do cronograma"));
+
+            // A definição de uma versão existente não pode ser reescrita
+            if (!Objects.equals(antigo.getDaysOfWeek(), novo.getDaysOfWeek())
+                    || !Objects.equals(antigo.getTimes(), novo.getTimes())
+                    || !Objects.equals(antigo.getStartDate(), novo.getStartDate())
+                    || !Objects.equals(antigo.getEndDate(), novo.getEndDate())
+                    || !Objects.equals(antigo.getTimezone(), novo.getTimezone())) {
+                throw new IllegalArgumentException(
+                        "Não é permitido alterar uma versão histórica");
+            }
+
+            // Uma versão histórica inativa não pode ser reativada
+            if (!antigo.isActive() && novo.isActive()) {
+                throw new IllegalArgumentException(
+                        "Não é permitido reativar uma versão histórica");
+            }
+        }
+    }
+
+
+    public void addMedication(MedicamentoEmUso medication) {
+
+        // Não permite alterar medicamentos de tratamentos encerrados
+        validarAlteracao();
         Objects.requireNonNull(medication, "medication não pode ser null");
+
+        MedicamentoEmUso copia = copiarMedicamento(medication);
+
         for (int i = 0; i < medications.size(); i++) {
-            if (medications.get(i).getId().equals(medication.getId())) {
-                medications.set(i, medication);
+
+            MedicamentoEmUso anterior = medications.get(i);
+
+            if (anterior.getId().equals(copia.getId())) {
+
+                // Garante que a atualização preserve o histórico
+                validarHistorico(anterior, copia);
+
+                medications.set(i, copia);
+
+                // Não permite deixar um tratamento ativo sem cronograma válido
+                if (status == TreatmentStatus.ACTIVE
+                        && !possuiCronogramaValido()) {
+
+                    medications.set(i, anterior);
+
+                    throw new IllegalArgumentException(
+                            "O tratamento precisa manter um cronograma válido");
+                }
+
                 return;
             }
         }
-        medications.add(medication);
+
+        // Adiciona um medicamento novo
+        medications.add(copia);
     }
+
 
     public Optional<MedicamentoEmUso> findMedicationById(String medicationId) {
         if (medicationId == null) {
@@ -189,7 +264,7 @@ public class Treatment {
         }
         for (MedicamentoEmUso medication : medications) {
             if (medicationId.equals(medication.getId())) {
-                return Optional.of(medication);
+                return Optional.of(copiarMedicamento(medication));
             }
         }
         return Optional.empty();
@@ -399,9 +474,23 @@ public class Treatment {
 
             return false;
 
-        } catch (DateTimeException e) {
+            // Trata datas, horários e dias da semana inválidos
+        } catch (DateTimeException | IllegalArgumentException e) {
             return false;
         }
+    }
+
+
+    // Cria uma cópia do medicamento para proteger os dados internos
+    private MedicamentoEmUso copiarMedicamento(MedicamentoEmUso medication) {
+        return new MedicamentoEmUso(
+                medication.getId(),
+                medication.getName(),
+                medication.getDose(),
+                medication.getQuantity(),
+                medication.getObservations(),
+                medication.getSchedules()
+        );
     }
 
     @Override
