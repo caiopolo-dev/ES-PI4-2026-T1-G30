@@ -13,6 +13,8 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReturnDocument;
 import org.bson.Document;
 
+import backend.models.DoseAction;
+
 public class MongoDoseRecordRepository implements DoseRecordRepository{
 
     private final MongoCollection<Document> collection;
@@ -41,13 +43,13 @@ public class MongoDoseRecordRepository implements DoseRecordRepository{
         return new RegistroDeDose(
                 doc.getString("_id"),
                 doc.getString("plannedDoseId"),
-                doc.getString("action"),
-                actualTime != null ? actualTime.toInstant() : null,  // verifica se existe um horário registrado,
+                doc.getString("userId"),
+                DoseAction.valueOf(doc.getString("action")),
+                actualTime != null ? actualTime.toInstant() : null, // verifica se existe um horário registrado,
                 //se existir, converte de Date para Instant, se não existir, retorna null
                 doc.getDate("recordedAt").toInstant()
         );
     }
-
     @Override
     public RegistroDeDose save(RegistroDeDose registro) {
         if (registro == null) {
@@ -60,10 +62,12 @@ public class MongoDoseRecordRepository implements DoseRecordRepository{
         // Monta o documento que será armazenado no MongoDB
         Document documento = new Document("_id", registro.getId())
                 .append("plannedDoseId", registro.getPlannedDoseId())
-                .append("action", registro.getAction())
+                .append("userId", registro.getUserId())
+                .append("action", registro.getAction().name()) // .name() converte a constante do enum para seu nome em String
                 .append("actualTime", registro.getActualTime() != null
                         ? Date.from(registro.getActualTime()) : null)
                 .append("recordedAt", Date.from(registro.getRecordedAt()));
+
 
         // Insere o registro somente se ainda não existir
         Document salvo = collection.findOneAndUpdate(
@@ -76,8 +80,14 @@ public class MongoDoseRecordRepository implements DoseRecordRepository{
 
         RegistroDeDose resultado = fromDocument(salvo);
 
+
+        // Impede retornar um registro pertencente a outro usuário
+        if (!resultado.getUserId().equals(registro.getUserId())) {
+            throw new IllegalStateException("Registro pertence a outro usuário");
+        }
+
         // Impede que uma dose já registrada receba uma ação contraditória
-        if (!resultado.getAction().equals(registro.getAction())) {
+        if (resultado.getAction() != registro.getAction()) {
             throw new IllegalStateException("Esta dose já possui um registro com outra ação");
         }
 
