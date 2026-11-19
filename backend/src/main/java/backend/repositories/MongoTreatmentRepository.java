@@ -216,7 +216,7 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 incomingTreatment.getUserId(),
                 incomingTreatment.getName(),
                 incomingTreatment.getDescription(),
-                incomingTreatment.isActive(),
+                incomingTreatment .isActive(),
                 mergedMedications
         );
     }

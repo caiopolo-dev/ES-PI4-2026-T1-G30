@@ -198,8 +198,7 @@ public class Treatment {
 
             CronogramaDose novo = atualizado
                     .getScheduleByVersion(antigo.getVersion())
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Não é permitido apagar versões do cronograma"));
+                    .orElseThrow(() -> new IllegalArgumentException("Não é permitido apagar versões do cronograma"));
 
             // A definição de uma versão existente não pode ser reescrita
             if (!Objects.equals(antigo.getDaysOfWeek(), novo.getDaysOfWeek())
@@ -207,14 +206,12 @@ public class Treatment {
                     || !Objects.equals(antigo.getStartDate(), novo.getStartDate())
                     || !Objects.equals(antigo.getEndDate(), novo.getEndDate())
                     || !Objects.equals(antigo.getTimezone(), novo.getTimezone())) {
-                throw new IllegalArgumentException(
-                        "Não é permitido alterar uma versão histórica");
+                throw new IllegalArgumentException("Não é permitido alterar uma versão histórica");
             }
 
             // Uma versão histórica inativa não pode ser reativada
             if (!antigo.isActive() && novo.isActive()) {
-                throw new IllegalArgumentException(
-                        "Não é permitido reativar uma versão histórica");
+                throw new IllegalArgumentException("Não é permitido reativar uma versão histórica");
             }
         }
     }
@@ -240,13 +237,11 @@ public class Treatment {
                 medications.set(i, copia);
 
                 // Não permite deixar um tratamento ativo sem cronograma válido
-                if (status == TreatmentStatus.ACTIVE
-                        && !possuiCronogramaValido()) {
+                if (status == TreatmentStatus.ACTIVE && !possuiCronogramaValido()) {
 
                     medications.set(i, anterior);
 
-                    throw new IllegalArgumentException(
-                            "O tratamento precisa manter um cronograma válido");
+                    throw new IllegalArgumentException("O tratamento precisa manter um cronograma válido");
                 }
 
                 return;
