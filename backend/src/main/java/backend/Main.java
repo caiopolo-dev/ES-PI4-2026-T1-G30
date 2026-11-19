@@ -2,39 +2,12 @@ package backend;
 
 import backend.auth.SessionAuthenticator;
 import backend.config.MongoConnection;
-import backend.handlers.AdherenceHandler;
-import backend.handlers.AgendaHandler;
-import backend.handlers.AuthHandler;
-import backend.handlers.HealthHandler;
-import backend.handlers.MedicationHandler;
-import backend.repositories.DoseRecordRepository;
-import backend.repositories.InMemoryMedicationRepository;
-import backend.repositories.MedicationRepository;
-import backend.services.MedicationService;
-import backend.repositories.MongoUserRepository;
-
-import backend.repositories.MongoDoseRecordRepository;
-import backend.repositories.MongoPlannedDoseRepository;
-import backend.repositories.PlannedDoseRepository;
-import backend.repositories.UserRepository;
+import backend.handlers.*;
+import backend.repositories.*;
+import backend.services.*;
 
 import backend.router.Router;
 import backend.server.Servidor;
-
-import backend.services.AuthService;
-
-import backend.handlers.LoginHandler;
-import backend.services.LoginService;
-
-import backend.repositories.SessionRepository;
-import backend.repositories.MongoSessionRepository;
-import backend.services.SessionService;
-import backend.services.BearerTokenExtractor;
-import backend.services.LoginRateLimiter;
-import backend.handlers.MeHandler;
-import backend.handlers.LogoutHandler;
-import backend.services.AdherenceService;
-import backend.services.AgendaService;
 
 public class Main {
 
@@ -77,6 +50,18 @@ public class Main {
             UserRepository userRepository =
                     new MongoUserRepository(mongoConnection.getCollection("users"));
 
+            // Repository que persiste os tratamentos no MongoDB
+            TreatmentRepository treatmentRepository =
+                    new MongoTreatmentRepository(mongoConnection.getDatabase());
+
+            // Serviço responsável pelas regras de negócio dos tratamentos
+            TreatmentService treatmentService =
+                    new TreatmentService(treatmentRepository);
+
+            // Handler que recebe as requisições HTTP de tratamentos
+            TreatmentHandler treatmentHandler =
+                    new TreatmentHandler(treatmentService);
+
             AuthService authService = new AuthService(userRepository);
             AuthHandler authHandler = new AuthHandler(authService);
 
@@ -110,6 +95,13 @@ public class Main {
             router.register("POST", "/auth/login", loginHandler);
             router.register("GET", "/auth/me", meHandler);
             router.register("POST", "/auth/logout", logoutHandler);
+            router.register("POST", "/treatments", treatmentHandler);
+            router.register("GET", "/treatments", treatmentHandler);
+            router.register("GET", "/treatments/{id}", treatmentHandler);
+            router.register("PUT", "/treatments/{id}", treatmentHandler);
+            router.register("POST", "/treatments/{id}/activate", treatmentHandler);
+            router.register("POST", "/treatments/{id}/close", treatmentHandler);
+
 
             // Inicialização do servidor
             Servidor servidor = new Servidor(porta, router);
