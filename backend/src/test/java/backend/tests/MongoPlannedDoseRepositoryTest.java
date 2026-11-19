@@ -2,6 +2,7 @@
 package backend.tests;
 
 import backend.models.DosePrevista;
+import backend.models.ScheduleStatus;
 import backend.repositories.MongoPlannedDoseRepository;
 
 import com.mongodb.client.MongoClient;
@@ -9,16 +10,20 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 
 import org.bson.Document;
+import org.bson.types.Decimal128;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 public class MongoPlannedDoseRepositoryTest {
 
@@ -30,13 +35,13 @@ public class MongoPlannedDoseRepositoryTest {
     void preparar() {
         String uri = System.getenv("MONGODB_URI");
 
-        if (uri == null || uri.isBlank()) {
-            throw new IllegalStateException("MONGODB_URI não configurada");
-        }
+        // Executa os testes de integração somente quando o MongoDB estiver configurado
+        assumeTrue(uri != null && !uri.isBlank(),
+                "MONGODB_URI não configurada");
 
         client = MongoClients.create(uri);
 
-        // Cria um nome único e curto para o banco temporário de testes
+        // Cria um banco temporário e exclusivo para cada teste
         String nomeBanco = "dosecerta_test_" +
                 UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
@@ -58,20 +63,25 @@ public class MongoPlannedDoseRepositoryTest {
         }
     }
 
-    // Cria uma DosePrevista para reutilizar nos testes
-    private DosePrevista criarDose(String id, String usuario,
-                                   String tratamento, String medicamento,
-                                   String horario) {
+    // Cria uma dose padrão para reutilizar nos testes
+    private DosePrevista criarDose(
+            String id,
+            String userId,
+            String treatmentId,
+            String medicationInUseId,
+            String horario) {
+
         return new DosePrevista(
                 id,
-                usuario,
-                tratamento,
-                medicamento,
+                userId,
+                treatmentId,
+                medicationInUseId,
+                "Losartana 50 mg",
                 1,
                 Instant.parse(horario),
                 "America/Sao_Paulo",
-                1,
-                DosePrevista.SCHEDULED
+                BigDecimal.ONE,
+                ScheduleStatus.SCHEDULED
         );
     }
 
@@ -87,6 +97,9 @@ public class MongoPlannedDoseRepositoryTest {
         // Verifica o objeto retornado
         assertEquals(dose.getId(), salva.getId());
         assertEquals(dose.getScheduledAt(), salva.getScheduledAt());
+        assertEquals(dose.getMedicationName(), salva.getMedicationName());
+        assertEquals(dose.getPlannedQuantity(), salva.getPlannedQuantity());
+        assertEquals(ScheduleStatus.SCHEDULED, salva.getStatus());
 
         // Confirma que o documento existe realmente no MongoDB
         Document documento = database.getCollection("planned_doses")
@@ -95,7 +108,13 @@ public class MongoPlannedDoseRepositoryTest {
 
         assertNotNull(documento);
         assertEquals("user-001", documento.getString("userId"));
+        assertEquals("Losartana 50 mg", documento.getString("medicationName"));
+        assertEquals("SCHEDULED", documento.getString("status"));
         assertNotNull(documento.getDate("scheduledAt"));
+
+        // Confirma que a quantidade foi armazenada como Decimal128
+        Decimal128 quantidade = documento.get("plannedQuantity", Decimal128.class);
+        assertEquals(BigDecimal.ONE, quantidade.bigDecimalValue());
     }
 
     @Test
@@ -136,7 +155,6 @@ public class MongoPlannedDoseRepositoryTest {
         );
 
         List<DosePrevista> doses = List.of(dose1, dose2);
-
         List<DosePrevista> resultado = repository.saveAll(doses);
 
         // Verifica se as duas doses foram salvas
@@ -163,6 +181,8 @@ public class MongoPlannedDoseRepositoryTest {
         assertTrue(resultado.isPresent());
         assertEquals("dose-001", resultado.get().getId());
         assertEquals("user-001", resultado.get().getUserId());
+        assertEquals("Losartana 50 mg", resultado.get().getMedicationName());
+        assertEquals(BigDecimal.ONE, resultado.get().getPlannedQuantity());
     }
 
     @Test
@@ -266,5 +286,87 @@ public class MongoPlannedDoseRepositoryTest {
         assertThrows(IllegalArgumentException.class, () ->
                 repository.findByTreatmentAndPeriod("trat-001", inicio, fim)
         );
+    }
+
+    @Test
+    void testQuantidadeFracionaria() {
+        DosePrevista dose = new DosePrevista(
+                "dose-fracionaria",
+                "user-001",
+                "trat-001",
+                "med-001",
+                "Losartana 50 mg",
+                1,
+                Instant.parse("2026-11-18T11:00:00Z"),
+                "America/Sao_Paulo",
+                new BigDecimal("0.5"),
+                ScheduleStatus.SCHEDULED
+        );
+
+        repository.save(dose);
+
+        // Verifica se a quantidade fracionária foi preservada
+        DosePrevista recuperada = repository.findById("dose-fracionaria")
+                .orElseThrow();
+
+        assertEquals(new BigDecimal("0.5"), recuperada.getPlannedQuantity());
+    }
+
+    @Test
+    void testCancelamentoAtualizaStatus() {
+        DosePrevista dose = criarDose(
+                "dose-001", "user-001", "trat-001", "med-001",
+                "2026-11-18T11:00:00Z"
+        );
+
+        repository.save(dose);
+
+        // Cancela a dose e salva novamente
+        DosePrevista cancelada = dose.cancel();
+        repository.save(cancelada);
+
+        // Verifica se o status foi atualizado no MongoDB
+        DosePrevista recuperada = repository.findById("dose-001")
+                .orElseThrow();
+
+        assertEquals(ScheduleStatus.CANCELLED, recuperada.getStatus());
+
+        // O cancelamento não deve criar uma segunda ocorrência
+        assertEquals(1, repository.countAll());
+
+        // O objeto original continua inalterado
+        assertEquals(ScheduleStatus.SCHEDULED, dose.getStatus());
+    }
+
+    @Test
+    void testFindByUserAndPeriod() {
+        DosePrevista dose1 = criarDose(
+                "dose-001", "user-001", "trat-001", "med-001",
+                "2026-11-18T10:00:00Z"
+        );
+
+        // Exatamente no limite final: não deve ser incluída
+        DosePrevista dose2 = criarDose(
+                "dose-002", "user-001", "trat-001", "med-001",
+                "2026-11-19T00:00:00Z"
+        );
+
+        // Dentro do período, mas de outro usuário
+        DosePrevista dose3 = criarDose(
+                "dose-003", "user-002", "trat-002", "med-002",
+                "2026-11-18T12:00:00Z"
+        );
+
+        repository.saveAll(List.of(dose1, dose2, dose3));
+
+        Instant inicio = Instant.parse("2026-11-18T00:00:00Z");
+        Instant fim = Instant.parse("2026-11-19T00:00:00Z");
+
+        List<DosePrevista> resultado =
+                repository.findByUserAndPeriod("user-001", inicio, fim);
+
+        // Deve retornar somente a primeira dose
+        assertEquals(1, resultado.size());
+        assertEquals("dose-001", resultado.get(0).getId());
     }
 }

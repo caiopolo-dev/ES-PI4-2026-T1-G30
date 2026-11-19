@@ -8,6 +8,9 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import backend.models.ScheduleStatus;
+import java.math.BigDecimal;
+import org.bson.types.Decimal128; // A classe pertence ao driver Java do MongoDB
 
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -33,7 +36,9 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
         // Cria um índice único para evitar doses duplicadas do mesmo medicamento,
         // na mesma versão do cronograma e no mesmo horário previsto.
         collection.createIndex(
-                new Document("medicationInUseId", 1)
+                new Document("userId", 1)
+                        .append("treatmentId", 1)
+                        .append("medicationInUseId", 1)
                         .append("scheduleVersion", 1)
                         .append("scheduledAt", 1),
                 new IndexOptions().unique(true)
@@ -47,47 +52,75 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
             throw new IllegalArgumentException("Dose não pode ser null");
         }
 
-        // Identifica a ocorrência, mesmo que ela tenha outro ID
-        Document filtro = new Document("medicationInUseId", dose.getMedicationInUseId())
+        // Identifica uma dose pelo usuário, tratamento, medicamento,
+        // versão do cronograma e horário previsto
+        Document filtro = new Document("userId", dose.getUserId())
+                .append("treatmentId", dose.getTreatmentId())
+                .append("medicationInUseId", dose.getMedicationInUseId())
                 .append("scheduleVersion", dose.getScheduleVersion())
                 .append("scheduledAt", Date.from(dose.getScheduledAt()));
 
-        // Monta o documento que será armazenado no MongoDB
+
+        // Monta os dados que serão inseridos caso a dose ainda não exista
         Document documento = new Document("_id", dose.getId())
                 .append("userId", dose.getUserId())
                 .append("treatmentId", dose.getTreatmentId())
                 .append("medicationInUseId", dose.getMedicationInUseId())
+                .append("medicationName", dose.getMedicationName())
                 .append("scheduleVersion", dose.getScheduleVersion())
                 .append("scheduledAt", Date.from(dose.getScheduledAt()))
                 .append("scheduleTimezone", dose.getScheduleTimezone())
-                .append("plannedQuantity", dose.getPlannedQuantity())
-                .append("status", dose.getStatus());
+                .append("plannedQuantity", new Decimal128(dose.getPlannedQuantity()));
 
-        // Insere somente se a ocorrência ainda não existir
+        // $setOnInsert: Insere os dados somente se a ocorrência ainda não existir
+        // $set: Atualiza o status mesmo quando a dose já estiver armazenada
+        Document atualizacao = new Document("$setOnInsert", documento)
+                .append("$set", new Document("status", dose.getStatus().name()));
+
         Document salvo = collection.findOneAndUpdate(
                 filtro, // Define os campos usados para localizar a dose
-                new Document("$setOnInsert", documento), // Insere os campos somente se a dose não existir
-                new FindOneAndUpdateOptions() // Configura a operação
-                        .upsert(true) // Permite inserir um novo documento caso nenhum seja encontrado
+                atualizacao,
+                new FindOneAndUpdateOptions()
+                        .upsert(true)  // Permite inserir um novo documento caso nenhum seja encontrado
                         .returnDocument(ReturnDocument.AFTER) // Retorna o documento após a operação usando operador AFTER do mongo
         );
 
         return fromDocument(salvo);
     }
+
     // Método auxiliar para retornar uma cópia de um documento (De DosePrevista) -> usado acima
+    // Converte um documento do MongoDB para um objeto DosePrevista
     private DosePrevista fromDocument(Document doc) {
+
+        // Recupera a quantidade armazenada no MongoDB
+        Object valor = doc.get("plannedQuantity");
+        BigDecimal quantidade;
+
+        // Decimal128 é uma das melhores maneiras de armazenar quantidades fracionárias no MongoDB sem perder precisão
+        if (valor instanceof Decimal128) {
+            // Novo formato: Decimal128 do MongoDB para BigDecimal do Java
+            quantidade = ((Decimal128) valor).bigDecimalValue();
+        } else if (valor instanceof Number) {
+            // Compatibilidade com documentos antigos que armazenavam Integer
+            quantidade = new BigDecimal(valor.toString());
+        } else {
+            throw new IllegalStateException("Quantidade armazenada inválida");
+        }
+
         return new DosePrevista(
                 doc.getString("_id"),
                 doc.getString("userId"),
                 doc.getString("treatmentId"),
                 doc.getString("medicationInUseId"),
+                doc.getString("medicationName"),
                 doc.getInteger("scheduleVersion"),
                 doc.getDate("scheduledAt").toInstant(),
                 doc.getString("scheduleTimezone"),
-                doc.getInteger("plannedQuantity"),
-                doc.getString("status")
+                quantidade,
+                ScheduleStatus.valueOf(doc.getString("status"))
         );
     }
+
 
 
     @Override
@@ -187,4 +220,36 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
         return doses;
     }
 
+
+    @Override
+    public List<DosePrevista> findByUserAndPeriod(String userId, Instant inicio, Instant fim) {
+        if (userId == null || userId.isBlank() || inicio == null || fim == null) {
+            throw new IllegalArgumentException("Usuário e período devem ser válidos");
+        }
+
+        if (!inicio.isBefore(fim)) {
+            throw new IllegalArgumentException("O início deve ser anterior ao fim");
+        }
+
+        // Filtra as doses do usuário dentro do período informado
+        Document filtro = new Document("userId", userId)
+                .append("scheduledAt", new Document("$gte", Date.from(inicio))
+                        .append("$lt", Date.from(fim)));
+
+        List<DosePrevista> doses = new ArrayList<>();
+
+        // Percorre os documentos encontrados e converte para DosePrevista
+        for (Document documento : collection.find(filtro)) {
+            doses.add(fromDocument(documento));
+        }
+
+        return doses;
+    }
+
+    @Override
+    public int countAll() {
+        // Conta os documentos armazenados na collection
+        return Math.toIntExact(collection.countDocuments()); // o método usado, ao contrário de um cast simples,
+        // lança uma exceção caso o valor não caiba em um int
+    }
 }

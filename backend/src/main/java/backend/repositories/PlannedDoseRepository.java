@@ -27,4 +27,11 @@ public interface PlannedDoseRepository {
 
     //O método retorna as "DosePrevista" dos medicamentos de um tratamento que estejam dentro do período solicitado
     List<DosePrevista> findByTreatmentAndPeriod(String treatmentId, Instant inicio, Instant fim);
+
+    // Busca as doses de um usuário dentro de um período
+    List<DosePrevista> findByUserAndPeriod(
+            String userId, Instant inicio, Instant fim);
+
+    // Retorna a quantidade de doses armazenadas
+    int countAll();
 }
