@@ -1,3 +1,4 @@
+// Autor: Miguel Batista Gallinucci, Samuel Campovilla
 package backend.http;
 
 import java.io.IOException;
