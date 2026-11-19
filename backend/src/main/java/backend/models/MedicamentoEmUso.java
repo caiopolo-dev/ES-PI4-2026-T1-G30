@@ -20,6 +20,7 @@ public class MedicamentoEmUso {
     private Integer quantity;
     private String unit;
     private boolean active = true;
+    private long revision;
     private String observations;
     private final List<CronogramaDose> schedules;
 
@@ -66,6 +67,21 @@ public class MedicamentoEmUso {
         this(id, name, dose, quantity, observations, schedules);
         setUnit(unit);
         this.active = active;
+    }
+
+    public MedicamentoEmUso(String id, String name, String dose, Integer quantity,
+            String unit, String observations, boolean active, List<CronogramaDose> schedules, long revision) {
+        this(id, name, dose, quantity, unit, observations, active, schedules);
+        if (revision < 0) { throw new IllegalArgumentException("Revisao invalida."); }
+        this.revision = revision;
+    }
+
+    public long getRevision() {
+        return revision;
+    }
+
+    public MedicamentoEmUso withRevision(long nextRevision) {
+        return new MedicamentoEmUso(id, name, dose, quantity, unit, observations, active, schedules, nextRevision);
     }
 
     public MedicamentoEmUso(
@@ -303,13 +319,14 @@ public class MedicamentoEmUso {
                 && Objects.equals(quantity, that.quantity)
                 && Objects.equals(unit, that.unit)
                 && active == that.active
+                && revision == that.revision
                 && Objects.equals(observations, that.observations)
                 && Objects.equals(schedules, that.schedules);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, dose, quantity, unit, active, observations, schedules);
+        return Objects.hash(id, name, dose, quantity, unit, active, revision, observations, schedules);
     }
 
     @Override

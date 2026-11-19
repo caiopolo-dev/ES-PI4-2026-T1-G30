@@ -25,7 +25,8 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
             throw new IllegalArgumentException("Use o fluxo de cronogramas para configurar horarios.");
         }
         Document document = fields(medication).append("id", medication.getId())
-            .append("active", medication.isActive()).append("schedules", List.of());
+            .append("active", medication.isActive()).append("revision", 0L).append("schedules", List.of());
+        if (medication.getRevision() != 0) { throw new IllegalArgumentException("Novo medicamento deve iniciar na revisao zero."); }
         Bson filter = Filters.and(owner(treatmentId, userId), Filters.ne("medications.id", medication.getId()));
         return treatments.updateOne(filter, Updates.push("medications", document)).getMatchedCount() == 1;
     }
@@ -53,14 +54,35 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
             changes.append("medications.$." + field.getKey(), field.getValue());
         }
         // Preserva ID, estado e todos os cronogramas armazenados.
-        return treatments.updateOne(ownedMedication(treatmentId, userId, medication.getId()),
-            new Document("$set", changes)).getMatchedCount() == 1;
+        Bson current = Filters.and(Filters.eq("id", medication.getId()), Filters.ne("active", false),
+            revisionFilter(medication.getRevision()));
+        Bson filter = Filters.and(owner(treatmentId, userId), Filters.elemMatch("medications", current));
+        return treatments.updateOne(filter, new Document("$set", changes)
+            .append("$inc", new Document("medications.$.revision", 1L))).getMatchedCount() == 1;
     }
 
     @Override
-    public boolean deactivate(String treatmentId, String userId, String medicationId) {
-        return treatments.updateOne(ownedMedication(treatmentId, userId, medicationId),
-            Updates.set("medications.$.active", false)).getMatchedCount() == 1;
+    public boolean deactivate(String treatmentId, String userId, String medicationId, long revision, int minimumRemainingActive) {
+        if (minimumRemainingActive < 0 || minimumRemainingActive > 1) {
+            throw new IllegalArgumentException("Minimo de medicamentos invalidos.");
+        }
+        ownedMedication(treatmentId, userId, medicationId);
+        Bson current = Filters.and(Filters.eq("id", medicationId), Filters.ne("active", false), revisionFilter(revision));
+        Document activeCount = new Document("$size", new Document("$filter",
+            new Document("input", "$medications").append("as", "med")
+                .append("cond", new Document("$ne", List.of(new Document("$ifNull", List.of("$$med.active", true)), false)))));
+        // Quantidade e revisao sao conferidas no mesmo comando atomico.
+        Bson filter = Filters.and(owner(treatmentId, userId), Filters.elemMatch("medications", current),
+            new Document("$expr", new Document("$gt", List.of(activeCount, minimumRemainingActive))));
+        return treatments.updateOne(filter, Updates.combine(Updates.set("medications.$.active", false),
+            Updates.inc("medications.$.revision", 1L))).getMatchedCount() == 1;
+    }
+
+    private Bson revisionFilter(long revision) {
+        if (revision < 0 || revision == Long.MAX_VALUE) { throw new IllegalArgumentException("Revisao invalida."); }
+        // Documentos antigos sem revision equivalem a revisao zero.
+        return revision == 0 ? Filters.or(Filters.exists("revision", false), Filters.eq("revision", 0L))
+            : Filters.eq("revision", revision);
     }
 
     private Bson owner(String treatmentId, String userId) {

@@ -16,6 +16,39 @@ class MedicationInUseServiceTest {
     private final AuthContext b = new AuthContext("b");
 
     @Test
+    void keepsLastActiveMedicationWhenRequiredByTreatmentRules() {
+        var repository = new TestRepository();
+        var rules = new TestRules();
+        rules.minimum = 1;
+        var service = new MedicationInUseService(repository, rules);
+        var first = service.add(a, "t", "First", "50 mg", 1, "mL", null);
+        var second = service.add(a, "t", "Second", "50 mg", 1, "mL", null);
+        service.deactivate(a, "t", first.getId());
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> service.deactivate(a, "t", second.getId()));
+        assertTrue(service.find(a, "t", second.getId()).isActive());
+        rules.minimum = 0;
+        service.deactivate(a, "t", second.getId());
+        assertFalse(service.find(a, "t", second.getId()).isActive());
+    }
+
+    @Test
+    void staleClientRevisionDoesNotOverwriteCurrentMedication() {
+        var repository = new TestRepository();
+        var service = new MedicationInUseService(repository, new TestRules());
+        var created = service.add(a, "t", "Demo", "50 mg", 1, "comprimido", null);
+        var first = service.update(a, "t", created.getId(), "First", "50 mg", 1, "comprimido", null, 0);
+        assertEquals(1, first.getRevision());
+        int before = repository.writes;
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> service.update(a, "t", created.getId(), "Stale", "50 mg", 1, "comprimido", null, 0));
+        assertEquals(before, repository.writes);
+        assertEquals("First", service.find(a, "t", created.getId()).getName());
+        var next = service.update(a, "t", created.getId(), "Next", "50 mg", 1, "comprimido", null, 1);
+        assertEquals(2, next.getRevision());
+    }
+
+    @Test
     void createsEditsAndDeactivatesOwnMedicationWithStableId() {
         var repository = new TestRepository();
         var rules = new TestRules();
@@ -84,6 +117,7 @@ class MedicationInUseServiceTest {
     private static class TestRules implements TreatmentMedicationRules {
         final List<String> calls = new ArrayList<>();
         boolean deny;
+        int minimum;
         private void check(String action) {
             calls.add(action);
             if (deny) { throw new IllegalStateException("Operacao negada pelas regras do tratamento."); }
@@ -91,6 +125,7 @@ class MedicationInUseServiceTest {
         public void validateAddition(AuthContext context, String treatmentId, MedicamentoEmUso medication) { check("add"); }
         public void validateUpdate(AuthContext context, String treatmentId, MedicamentoEmUso medication) { check("update"); }
         public void validateDeactivation(AuthContext context, String treatmentId, MedicamentoEmUso medication) { check("deactivate"); }
+        public int minimumRemainingActiveMedications(AuthContext context, String treatmentId) { return minimum; }
     }
 
     private static class TestRepository implements MedicationInUseRepository {
@@ -105,12 +140,16 @@ class MedicationInUseServiceTest {
         }
         public boolean update(String treatmentId, String userId, MedicamentoEmUso medication) {
             if (find(treatmentId, userId, medication.getId()).isEmpty()) { return false; }
-            medications.put(medication.getId(), medication); writes++; return true;
+            if (medications.get(medication.getId()).getRevision() != medication.getRevision()) { return false; }
+            medications.put(medication.getId(), medication.withRevision(medication.getRevision() + 1)); writes++; return true;
         }
-        public boolean deactivate(String treatmentId, String userId, String medicationId) {
+        public boolean deactivate(String treatmentId, String userId, String medicationId, long revision, int minimumRemainingActive) {
             var medication = find(treatmentId, userId, medicationId);
             if (medication.isEmpty()) { return false; }
-            medication.get().deactivate(); writes++; return true;
+            if (medication.get().getRevision() != revision) { return false; }
+            if (medications.values().stream().filter(MedicamentoEmUso::isActive).count() <= minimumRemainingActive) { return false; }
+            medication.get().deactivate();
+            medications.put(medicationId, medication.get().withRevision(revision + 1)); writes++; return true;
         }
     }
 }

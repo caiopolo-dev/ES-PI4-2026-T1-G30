@@ -1,0 +1,16 @@
+[33mcommit fb692d69845309584803fdade7c622b0e9ca7edb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32missue-24-2[m[33m, [m[1;32mcodex/issue-27-medicamentos-em-uso[m[33m)[m
+Author: miguelgallinucci <migallinucci@icloud.com>
+Date:   Wed Nov 18 19:35:55 2026 -0300
+
+    adiciona serviço de medicamentos em uso e contrato de regras do tratamento
+
+ .../main/java/backend/models/MedicamentoEmUso.java |  49 [32m++++++++[m[31m-[m
+ .../repositories/MedicationInUseRepository.java    |  12 [32m+++[m
+ .../MongoMedicationInUseRepository.java            |  85 [32m+++++++++++++++[m
+ .../repositories/MongoTreatmentRepository.java     |   6 [32m++[m
+ .../backend/services/MedicationInUseService.java   |  64 [32m++++++++++++[m
+ .../backend/services/TreatmentMedicationRules.java |  11 [32m++[m
+ .../java/backend/tests/MedicamentoEmUsoTest.java   |  55 [32m++++++++++[m
+ .../tests/MedicationInUseIntegrationTest.java      |  80 [32m++++++++++++++[m
+ .../backend/tests/MedicationInUseServiceTest.java  | 116 [32m+++++++++++++++++++++[m
+ 9 files changed, 473 insertions(+), 5 deletions(-)

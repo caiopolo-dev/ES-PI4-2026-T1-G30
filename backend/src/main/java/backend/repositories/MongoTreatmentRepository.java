@@ -208,7 +208,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         incomingMed.getUnit(),
                         incomingMed.getObservations(),
                         incomingMed.isActive(),
-                        mergedSchedules
+                        mergedSchedules,
+                        incomingMed.getRevision()
                 ));
             }
         }
@@ -320,6 +321,7 @@ public class MongoTreatmentRepository implements TreatmentRepository {
             medDoc.put("quantity", med.getQuantity());
             medDoc.put("unit", med.getUnit());
             medDoc.put("active", med.isActive());
+            medDoc.put("revision", med.getRevision());
             medDoc.put("observations", med.getObservations());
 
             List<Map<String, Object>> scheduleDocs = new ArrayList<>();
@@ -407,7 +409,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         (String) medDoc.get("unit"),
                         observations,
                         !Boolean.FALSE.equals(medDoc.get("active")),
-                        schedules
+                        schedules,
+                        medDoc.get("revision") instanceof Number ? ((Number) medDoc.get("revision")).longValue() : 0L
                 ));
             }
         }
