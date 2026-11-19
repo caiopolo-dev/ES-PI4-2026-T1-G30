@@ -55,18 +55,28 @@ public class Main {
         MedicationService medicationService = new MedicationService(medicationRepository);
         MedicationHandler medicationHandler = new MedicationHandler(medicationService);
 
-        // Configuração de agenda e adesão/pontualidade
-        PlannedDoseRepository plannedDoseRepository = new MongoPlannedDoseRepository();
-        DoseRecordRepository doseRecordRepository = new MongoDoseRecordRepository();
-        AgendaService agendaService = new AgendaService(plannedDoseRepository, doseRecordRepository);
-        AdherenceService adherenceService = new AdherenceService(plannedDoseRepository, doseRecordRepository);
 
         // Conexão com o MongoDB
         try (MongoConnection mongoConnection = new MongoConnection()) {
 
+            // Configuração dos repositories de doses usando a conexão MongoDB
+            PlannedDoseRepository plannedDoseRepository =
+                    new MongoPlannedDoseRepository(mongoConnection.getDatabase());
+
+            DoseRecordRepository doseRecordRepository =
+                    new MongoDoseRecordRepository(mongoConnection.getDatabase());
+
+            // Configuração dos serviços de agenda e adesão
+            AgendaService agendaService =
+                    new AgendaService(plannedDoseRepository, doseRecordRepository);
+
+            AdherenceService adherenceService =
+                    new AdherenceService(plannedDoseRepository, doseRecordRepository);
 
             // Configuração do cadastro de usuários
-            UserRepository userRepository = new MongoUserRepository(mongoConnection.getCollection("users"));
+            UserRepository userRepository =
+                    new MongoUserRepository(mongoConnection.getCollection("users"));
+
             AuthService authService = new AuthService(userRepository);
             AuthHandler authHandler = new AuthHandler(authService);
 

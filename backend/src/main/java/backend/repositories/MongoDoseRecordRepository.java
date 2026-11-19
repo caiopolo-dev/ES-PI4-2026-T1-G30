@@ -3,9 +3,7 @@ package backend.repositories;
 import backend.models.RegistroDeDose;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 // IMPORT DAS CLASSES QUE COMUNICAM COM O MONGO
 import com.mongodb.client.MongoCollection;
@@ -14,8 +12,6 @@ import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReturnDocument;
 import org.bson.Document;
-
-import java.util.Date;
 
 public class MongoDoseRecordRepository implements DoseRecordRepository{
 
@@ -133,4 +129,36 @@ public class MongoDoseRecordRepository implements DoseRecordRepository{
 
         return registros;
     }
+
+    @Override
+    public int countAll() {
+        // Conta todos os registros armazenados na collection
+        return Math.toIntExact(collection.countDocuments());
+    }
+
+
+
+    @Override
+    public Map<String, RegistroDeDose> findByPlannedDoseIds(Collection<String> plannedDoseIds) {
+
+        var registros = new HashMap<String, RegistroDeDose>();
+
+        if (plannedDoseIds == null || plannedDoseIds.isEmpty()) {
+            return registros;
+        }
+
+        // Busca todos os registros correspondentes aos IDs informados
+        Document filtro = new Document("plannedDoseId",
+                new Document("$in", plannedDoseIds));
+
+        // Percorre os documentos encontrados e armazena cada registro pelo ID da dose prevista
+        for (Document documento : collection.find(filtro)) {
+            RegistroDeDose registro = fromDocument(documento);
+            registros.put(registro.getPlannedDoseId(), registro);
+        }
+
+        return registros;
+    }
+
+
 }

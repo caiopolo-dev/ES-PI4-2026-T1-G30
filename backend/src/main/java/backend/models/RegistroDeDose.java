@@ -12,6 +12,7 @@ public class RegistroDeDose {
     public static final String TAKEN = "TAKEN";
     public static final String SKIPPED = "SKIPPED";
 
+    private final String userId;
     private final String id;
     private final String plannedDoseId;
     private final String action;
@@ -19,11 +20,16 @@ public class RegistroDeDose {
     private final Instant recordedAt;
 
     public RegistroDeDose(
+            String userId,
             String id,
             String plannedDoseId,
             String action,
             Instant actualTime,
             Instant recordedAt) {
+
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("ID do usuário não pode ser nulo ou vazio");
+        }
 
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("ID do registro inválido");
@@ -51,6 +57,7 @@ public class RegistroDeDose {
             throw new IllegalArgumentException("SKIPPED não deve ter actualTime");
         }
 
+        this.userId = userId.trim();
         this.id = id.trim();
         this.plannedDoseId = plannedDoseId.trim();
         this.action = action;
@@ -76,5 +83,9 @@ public class RegistroDeDose {
 
     public Instant getRecordedAt() {
         return recordedAt;
+    }
+
+    public String getUserId() {
+        return userId;
     }
 }
