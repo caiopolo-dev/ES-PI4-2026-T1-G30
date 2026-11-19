@@ -61,6 +61,11 @@ public class Router {
                     break;
                 }
             }
+            // Nenhuma rota registrada corresponde ao caminho solicitado.
+            // Retorna 404 antes de tentar acessar um Map inexistente.
+            if (handlersByMethod == null) {
+                return HttpResponse.notFound("Route not found: " + path);
+            }
         }
 
         // 2. Verifica se o método HTTP é permitido para essa rota
