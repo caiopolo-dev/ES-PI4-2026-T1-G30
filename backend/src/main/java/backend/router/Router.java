@@ -26,7 +26,7 @@ public class Router {
 
     // Mapa que relaciona: path -> (method -> HttpHandler)
     // Ex: "/health" -> { "GET" -> HealthHandler }
-    private final Map<String, Map<String, HttpHandler>> routes = new HashMap<>();
+    private final Map<String, Map<String, HttpHandler>> routes = new java.util.LinkedHashMap<>();
 
     /**
      * Registra centralizadamente uma rota relacionando método HTTP + path a um handler.
@@ -49,6 +49,14 @@ public class Router {
 
         // 1. Verifica se a rota (path) existe
         Map<String, HttpHandler> handlersByMethod = routes.get(path);
+        if (handlersByMethod == null) {
+            for (var route : routes.entrySet()) {
+                if (matches(route.getKey(), path)) {
+                    handlersByMethod = route.getValue();
+                    break;
+                }
+            }
+        }
         if (handlersByMethod == null) {
             return HttpResponse.notFound("Route not found: " + path);
         }
@@ -75,6 +83,20 @@ public class Router {
             }
         }
         return execute(handler, request);
+    }
+
+    // Permite IDs no caminho e preserva a prioridade das rotas exatas.
+    private boolean matches(String template, String path) {
+        if (!template.contains("{")) { return false; }
+        String[] expected = template.split("/", -1);
+        String[] actual = path.split("/", -1);
+        if (expected.length != actual.length) { return false; }
+        for (int index = 0; index < expected.length; index++) {
+            if (expected[index].startsWith("{") && expected[index].endsWith("}")) {
+                if (actual[index].isEmpty()) { return false; }
+            } else if (!expected[index].equals(actual[index])) { return false; }
+        }
+        return true;
     }
 
     private HttpResponse execute(HttpHandler handler, HttpRequest request) {

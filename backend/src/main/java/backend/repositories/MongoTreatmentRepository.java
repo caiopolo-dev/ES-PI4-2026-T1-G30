@@ -205,8 +205,11 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         incomingMed.getName(),
                         incomingMed.getDose(),
                         incomingMed.getQuantity(),
+                        incomingMed.getUnit(),
                         incomingMed.getObservations(),
-                        mergedSchedules
+                        incomingMed.isActive(),
+                        mergedSchedules,
+                        incomingMed.getRevision()
                 ));
             }
         }
@@ -316,6 +319,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
             medDoc.put("name", med.getName());
             medDoc.put("dose", med.getDose());
             medDoc.put("quantity", med.getQuantity());
+            medDoc.put("unit", med.getUnit());
+            medDoc.put("active", med.isActive());
+            medDoc.put("revision", med.getRevision());
             medDoc.put("observations", med.getObservations());
 
             List<Map<String, Object>> scheduleDocs = new ArrayList<>();
@@ -400,8 +406,11 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         medName,
                         dose,
                         quantity,
+                        (String) medDoc.get("unit"),
                         observations,
-                        schedules
+                        !Boolean.FALSE.equals(medDoc.get("active")),
+                        schedules,
+                        medDoc.get("revision") instanceof Number ? ((Number) medDoc.get("revision")).longValue() : 0L
                 ));
             }
         }
