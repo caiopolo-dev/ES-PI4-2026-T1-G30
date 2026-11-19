@@ -187,4 +187,36 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
         return doses;
     }
 
+
+    @Override
+    public List<DosePrevista> findByUserAndPeriod(String userId, Instant inicio, Instant fim) {
+        if (userId == null || userId.isBlank() || inicio == null || fim == null) {
+            throw new IllegalArgumentException("Usuário e período devem ser válidos");
+        }
+
+        if (!inicio.isBefore(fim)) {
+            throw new IllegalArgumentException("O início deve ser anterior ao fim");
+        }
+
+        // Filtra as doses do usuário dentro do período informado
+        Document filtro = new Document("userId", userId)
+                .append("scheduledAt", new Document("$gte", Date.from(inicio))
+                        .append("$lt", Date.from(fim)));
+
+        List<DosePrevista> doses = new ArrayList<>();
+
+        // Percorre os documentos encontrados e converte para DosePrevista
+        for (Document documento : collection.find(filtro)) {
+            doses.add(fromDocument(documento));
+        }
+
+        return doses;
+    }
+
+    @Override
+    public int countAll() {
+        // Conta os documentos armazenados na collection
+        return Math.toIntExact(collection.countDocuments()); // o método usado, ao contrário de um cast simples,
+        // lança uma exceção caso o valor não caiba em um int
+    }
 }
