@@ -1,14 +1,8 @@
 // Autores: Cauã Bianchi Ferroni, Samuel Campovilla
 package backend.models;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import java.time.*;
+import java.util.*;
 
 /**
  * Representa um tratamento médico associado a um usuário específico (titular).
@@ -225,8 +219,6 @@ public class Treatment {
     }
 
 
-
-
      // Ativa um tratamento que está em DRAFT.
      // Antes da ativação, verifica se o tratamento possui
      // as informações necessárias para iniciar.
@@ -234,46 +226,183 @@ public class Treatment {
 
         // Somente tratamentos em DRAFT podem ser ativados
         if (status != TreatmentStatus.DRAFT) {
-            throw new IllegalStateException("Somente tratamentos em DRAFT podem ser ativados");
+            throw new IllegalStateException(
+                    "Somente tratamentos em DRAFT podem ser ativados");
         }
 
-        // O nome é obrigatório para ativar o tratamento
-        if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("O tratamento deve possuir um nome");
-        }
+        // Verifica os dados e o cronograma antes de ativar
+        validarDadosAtivacao();
 
-        // O tratamento precisa possuir uma data de início
-        if (startDate == null) {
-            throw new IllegalArgumentException("A data de início é obrigatória");
-        }
-
-        // A data final não pode anteceder a inicial
-        if (endDate != null && endDate.isBefore(startDate)) {
-            throw new IllegalArgumentException("A data final não pode anteceder a inicial");
-        }
-
-        // Verifica se existe pelo menos um medicamento com cronograma ativo
-        boolean possuiCronogramaAtivo = false;
-
-        for (MedicamentoEmUso medication : medications) {
-
-            // Verifica se o medicamento possui um cronograma ativo
-            if (medication.getActiveSchedule().isPresent()) {
-                possuiCronogramaAtivo = true;
-                break;
-            }
-        }
-
-        if (!possuiCronogramaAtivo) {
-            throw new IllegalArgumentException("O tratamento precisa de um medicamento com cronograma ativo");
-        }
-
-        // Todas as verificações passaram, então o tratamento é ativado
         this.status = TreatmentStatus.ACTIVE;
     }
 
 
 
+
+     // Atualiza o período planejado de um tratamento.
+     // Permite alterações apenas enquanto estiver em DRAFT.
+    public void updatePeriod(LocalDate startDate, LocalDate endDate) {
+
+        // Somente rascunhos podem ter o período alterado
+        if (status != TreatmentStatus.DRAFT) {
+            throw new IllegalStateException(
+                    "Somente tratamentos em DRAFT podem alterar o período");
+        }
+
+        // A data final não pode ser anterior à data inicial
+        if (startDate != null && endDate != null
+                && endDate.isBefore(startDate)) {
+            throw new IllegalArgumentException(
+                    "A data final não pode anteceder a inicial");
+        }
+
+        // Atualiza as datas somente após validar o período
+        this.startDate = startDate;
+        this.endDate = endDate;
+    }
+
+    // Verifica se os dados necessários para ativar estão completos
+    private void validarDadosAtivacao() {
+
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException(
+                    "O tratamento deve possuir um nome");
+        }
+
+        if (startDate == null) {
+            throw new IllegalArgumentException(
+                    "A data de início é obrigatória");
+        }
+
+        if (endDate != null && endDate.isBefore(startDate)) {
+            throw new IllegalArgumentException(
+                    "A data final não pode anteceder a inicial");
+        }
+
+        if (!possuiCronogramaValido()) {
+            throw new IllegalArgumentException(
+                    "O tratamento precisa de um medicamento com cronograma válido");
+        }
+    }
+
+    // Verifica se pelo menos um medicamento possui cronograma válido
+    private boolean possuiCronogramaValido() {
+
+        for (MedicamentoEmUso medication : medications) {
+
+            Optional<CronogramaDose> cronograma = medication.getActiveSchedule();
+
+            if (cronograma.isPresent() && cronogramaValido(cronograma.get())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
+    // Verifica os campos básicos e a vigência de um cronograma
+    private boolean cronogramaValido(CronogramaDose cronograma) {
+
+        if (cronograma == null || !cronograma.isActive()) {
+            return false;
+        }
+
+        try {
+            LocalDate inicio = LocalDate.parse(cronograma.getStartDate());
+
+            LocalDate fim = cronograma.getEndDate() == null ? null : LocalDate.parse(cronograma.getEndDate());
+
+            if (fim != null && fim.isBefore(inicio)) {
+                return false;
+            }
+
+            // Verifica se o fuso horário existe
+            ZoneId.of(cronograma.getTimezone());
+
+            // Verifica os horários e impede repetições
+            // Set é uma interface que representa uma coleção de elementos sem duplicatas !!!
+            Set<LocalTime> horarios = new HashSet<>();
+
+            if (cronograma.getTimes() == null || cronograma.getTimes().isEmpty()) {
+                return false;
+            }
+
+            for (String horario : cronograma.getTimes()) {
+                // verificando se a String possui o formato HH:mm, como "08:00" ou "20:30"
+                if (horario == null || !horario.matches("\\d{2}:\\d{2}")) {
+                    return false;
+                }
+
+                LocalTime hora = LocalTime.parse(horario);
+
+                if (!horarios.add(hora)) {
+                    return false;
+                }
+            }
+
+            // null representa recorrência diária no modelo atual
+            List<String> dias = cronograma.getDaysOfWeek();
+            Set<DayOfWeek> diasSemana = new HashSet<>();
+
+            if (dias != null) {
+
+                if (dias.isEmpty()) {
+                    return false;
+                }
+
+                for (String dia : dias) {
+
+                    if (dia == null) {
+                        return false;
+                    }
+
+                    DayOfWeek diaSemana = DayOfWeek.valueOf(dia);
+
+                    if (!diasSemana.add(diaSemana)) {
+                        return false;
+                    }
+                }
+            }
+
+            // Calcula a interseção entre tratamento e cronograma
+            LocalDate inicioEfetivo = inicio.isAfter(startDate) ? inicio : startDate;
+
+            LocalDate fimEfetivo = endDate;
+
+            if (fim != null && (fimEfetivo == null || fim.isBefore(fimEfetivo))) {
+                fimEfetivo = fim;
+            }
+
+            if (fimEfetivo != null && fimEfetivo.isBefore(inicioEfetivo)) {
+                return false;
+            }
+
+            // Cronograma diário possui ocorrência na vigência
+            if (dias == null) {
+                return true;
+            }
+
+            // Em até 7 dias, verifica se algum dia escolhido ocorre
+            for (int i = 0; i < 7; i++) {
+
+                LocalDate data = inicioEfetivo.plusDays(i);
+
+                if (fimEfetivo != null && data.isAfter(fimEfetivo)) {
+                    break;
+                }
+
+                if (diasSemana.contains(data.getDayOfWeek())) {
+                    return true;
+                }
+            }
+
+            return false;
+
+        } catch (DateTimeException e) {
+            return false;
+        }
+    }
 
     @Override
     public boolean equals(Object o) {
