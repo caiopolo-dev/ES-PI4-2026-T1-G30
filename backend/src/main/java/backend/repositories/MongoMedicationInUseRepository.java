@@ -32,18 +32,22 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
     }
 
     @Override
-    public Optional<MedicamentoEmUso> find(String treatmentId, String userId, String medicationId) {
+    public Optional<MedicamentoEmUso> find(
+            String treatmentId,
+            String userId,
+            String medicationId) {
+
         Document treatment = treatments.find(ownedMedication(treatmentId, userId, medicationId)).first();
-        if (treatment == null) { return Optional.empty(); }
-        for (Document medication : treatment.getList("medications", Document.class)) {
-            if (medicationId.equals(medication.getString("id"))) {
-                // Reutiliza o mapeamento existente, inclusive para cronogramas historicos.
-                return Optional.of(new MongoTreatmentRepository().fromDocument(
-                    new Document("_id", treatmentId).append("userId", userId).append("name", "mapping")
-                        .append("medications", List.of(medication))).getMedications().get(0));
-            }
+
+        if (treatment == null) {
+            return Optional.empty();
         }
-        return Optional.empty();
+
+        // Utiliza a mesma collection MongoDB para reconstruir
+        // o tratamento e localizar seu medicamento.
+        MongoTreatmentRepository repository = new MongoTreatmentRepository(treatments);
+
+        return repository.fromDocument(treatment).findMedicationById(medicationId);
     }
 
     @Override

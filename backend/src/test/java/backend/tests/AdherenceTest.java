@@ -40,10 +40,22 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
+
+import org.junit.jupiter.api.AfterEach;
+
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 /**
  * Suíte de testes JUnit 5 para a Issue #36 - [ADHERENCE] Cálculo dos indicadores de adesão e pontualidade.
  */
 public class AdherenceTest {
+    private MongoClient mongoClient;
+    private MongoDatabase testDatabase;
 
     private static final String TIMEZONE_SP = "America/Sao_Paulo";
     // Referência: 2026-11-04 12:00:00 America/Sao_Paulo = 2026-11-04T15:00:00Z
@@ -58,8 +70,25 @@ public class AdherenceTest {
 
     @BeforeEach
     void setUp() {
-        plannedDoseRepository = new MongoPlannedDoseRepository();
-        doseRecordRepository = new MongoDoseRecordRepository();
+        String uri = System.getenv("MONGODB_URI");
+
+        // Não executa os testes MongoDB sem uma conexão configurada.
+        assumeTrue(uri != null && !uri.isBlank(),
+                "MONGODB_URI não configurada");
+
+        mongoClient = MongoClients.create(uri);
+
+        // Banco exclusivo para cada teste, evitando misturar os dados.
+        String nomeBanco = "dosecerta_test_"
+                + UUID.randomUUID().toString()
+                        .replace("-", "")
+                        .substring(0, 16);
+
+        testDatabase = mongoClient.getDatabase(nomeBanco);
+
+        // Instancia os repositories usando o banco de teste.
+        plannedDoseRepository = new MongoPlannedDoseRepository(testDatabase);
+        doseRecordRepository = new MongoDoseRecordRepository(testDatabase);
         Clock fixedClock = Clock.fixed(FIXED_NOW, ZoneId.of("UTC"));
 
         authenticator = new InMemorySessionAuthenticator(fixedClock);
@@ -78,6 +107,21 @@ public class AdherenceTest {
         adherenceHandler = new AdherenceHandler(adherenceService);
         router = new Router(authenticator);
         router.register("GET", "/adherence/summary", adherenceHandler);
+    }
+
+    @AfterEach
+    void limpar() {
+        try {
+            // Remove exclusivamente o banco temporário de testes.
+            if (testDatabase != null
+                    && testDatabase.getName().startsWith("dosecerta_test_")) {
+                testDatabase.drop();
+            }
+        } finally {
+            if (mongoClient != null) {
+                mongoClient.close();
+            }
+        }
     }
 
     private Map<String, String> authHeader(String token) {

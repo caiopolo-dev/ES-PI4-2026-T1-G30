@@ -1,3 +1,4 @@
+//Autores: Cauã Bianchi Ferroni, Miguel Batista Gallinucci
 package backend.tests;
 
 import backend.config.MongoConnection;
@@ -42,8 +43,10 @@ class AuthorizationMongoIntegrationTest {
                 router.register("POST", "/auth/login", new LoginHandler(new LoginService(users), sessions, new LoginRateLimiter()));
                 router.register("GET", "/auth/me", new MeHandler(sessions, users, extractor));
                 router.register("POST", "/auth/logout", new LogoutHandler(sessions, extractor));
-                var treatments = new MongoTreatmentRepository();
-                treatments.save(new Treatment("treatment-a", userA.getId(), "Demo treatment"));
+                var treatments = new MongoTreatmentRepository(connection.getDatabase());
+                treatments.save(new Treatment(
+                    "treatment-a", userA.getId(), "Demo treatment", null,
+                    null, null, backend.models.TreatmentStatus.DRAFT, null, java.util.List.of()));
                 var access = new TreatmentAccessService(treatments);
                 // Rota exclusiva do teste: nao representa endpoint de produto implementado.
                 router.register("GET", "/test/owned", request -> {

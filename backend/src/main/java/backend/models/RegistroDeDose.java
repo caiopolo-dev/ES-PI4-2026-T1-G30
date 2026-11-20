@@ -1,4 +1,4 @@
-
+// Autor: Samuel Campovilla
 package backend.models;
 
 import java.time.Instant;

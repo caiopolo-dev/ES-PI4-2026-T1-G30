@@ -1,3 +1,4 @@
+//Autores: Cauã Bianchi Ferroni, Miguel Batista Gallinucci, Samuel Campovilla
 package backend.router;
 
 import backend.auth.AccessAudit;
@@ -47,8 +48,13 @@ public class Router {
         String path = request.getPath();
         String method = request.getMethod().toUpperCase();
 
-        // 1. Verifica se a rota (path) existe
+        // 1. Primeiro procura uma rota com caminho exatamente igual
         Map<String, HttpHandler> handlersByMethod = routes.get(path);
+        // Map.Entry<String, HtttpHandler>: representa uma entrada do mapa, com chave String e valor HttpHandler.
+
+
+        // Se não houver correspondência exata,
+        // procura uma rota dinâmica como /treatments/{id}.
         if (handlersByMethod == null) {
             for (var route : routes.entrySet()) {
                 if (matches(route.getKey(), path)) {
@@ -57,6 +63,8 @@ public class Router {
                 }
             }
         }
+
+        // Nenhuma rota encontrada: HTTP 404.
         if (handlersByMethod == null) {
             return HttpResponse.notFound("Route not found: " + path);
         }
@@ -118,4 +126,42 @@ public class Router {
             return HttpResponse.internalServerError("Internal server error");
         }
     }
+
+
+    // Compara uma rota registrada com o caminho real da requisição.
+    // Exemplo:
+    // /treatments/{id} corresponde a /treatments/123
+    // /treatments/{id}/close corresponde a /treatments/123/close
+    private boolean caminhoCorrespondente(String rota, String caminho) {
+
+        String[] partesRota = rota.split("/", -1);
+        String[] partesCaminho = caminho.split("/", -1);
+
+        // Caminhos com quantidades diferentes de segmentos não correspondem
+        if (partesRota.length != partesCaminho.length) {
+            return false;
+        }
+
+        for (int i = 0; i < partesRota.length; i++) {
+
+            String parteRota = partesRota[i];
+            String parteCaminho = partesCaminho[i];
+
+            // Uma parte entre chaves representa um parâmetro dinâmico
+            if (parteRota.startsWith("{") && parteRota.endsWith("}")
+                    && parteRota.length() > 2) {
+
+                // O parâmetro precisa possuir algum valor
+                if (parteCaminho.isEmpty()) {
+                    return false;
+                }
+
+            } else if (!parteRota.equals(parteCaminho)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
 }

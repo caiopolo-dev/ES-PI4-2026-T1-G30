@@ -1,86 +1,93 @@
+//Autor: Cauã Bianchi Ferroni
 package backend.repositories;
 
 import backend.models.CronogramaDose;
 import backend.models.MedicamentoEmUso;
 import backend.models.Treatment;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
+import backend.models.TreatmentStatus;
+
+import com.mongodb.MongoWriteException;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Indexes;
+import com.mongodb.client.result.UpdateResult;
+
+import org.bson.Document;
+import org.bson.types.Decimal128;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Implementação de TreatmentRepository baseada no modelo de documentos do MongoDB.
+ * Implementação de TreatmentRepository persistida diretamente no MongoDB
+ * utilizando o driver oficial (mongodb-driver-sync).
  *
  * <p>Responsabilidades:
  * <ul>
- *   <li>Persistir Treatment com seus medicamentos em uso e cronogramas aninhados;</li>
- *   <li>Recuperar tratamentos por ID;</li>
- *   <li>Listar tratamentos filtrando pelo usuário titular (userId);</li>
- *   <li>Atualizar tratamentos preservando versões históricas de CronogramaDose;</li>
- *   <li>Operar tanto conectado a uma instância MongoDB via Wire Protocol (OP_MSG/BSON)
- *       quanto em coleção de documentos MongoDB em memória (sem dependências externas).</li>
+ *   <li>Persistir Treatment (incluindo período, status do ciclo de vida, closedAt,
+ *       medicamentos em uso e cronogramas aninhados) na collection {@code treatments};</li>
+ *   <li>Recuperar tratamentos por ID e por ID + titular ({@code userId});</li>
+ *   <li>Listar tratamentos filtrando pelo usuário titular ({@code userId});</li>
+ *   <li>Atualizar tratamentos preservando versões históricas de {@link CronogramaDose}
+ *       e impedindo alteração de titular ou de tratamentos encerrados.</li>
  * </ul>
  */
 public class MongoTreatmentRepository implements TreatmentRepository {
 
-    public static final String DEFAULT_DATABASE = "dosecerta-dev";
     public static final String DEFAULT_COLLECTION = "treatments";
 
-    private final String host;
-    private final int port;
+    private final MongoCollection<Document> collection;
     private final String databaseName;
     private final String collectionName;
-    private final boolean useRemoteSocket;
 
     /**
-     * Armazenamento de documentos no formato estrutural do MongoDB (_id -> Document Map)
-     * para operação local/embarcada e fallback determinístico em testes.
+     * Cria o repositório utilizando a collection padrão {@code treatments} no banco informado.
      */
-    private final Map<String, Map<String, Object>> documentCollection = new LinkedHashMap<>();
-
-    /**
-     * Cria o repositório utilizando a coleção de documentos MongoDB embarcada (padrão para execução local e testes).
-     */
-    public MongoTreatmentRepository() {
-        this(null, 27017, DEFAULT_DATABASE, DEFAULT_COLLECTION, false);
+    public MongoTreatmentRepository(MongoDatabase database) {
+        this(database, DEFAULT_COLLECTION);
     }
 
     /**
-     * Cria o repositório configurado para uma instância MongoDB em host e porta específicos.
+     * Cria o repositório utilizando uma collection específica no banco informado.
      */
-    public MongoTreatmentRepository(String host, int port, String databaseName, String collectionName) {
-        this(host, port, databaseName, collectionName, true);
-    }
-
-    private MongoTreatmentRepository(
-            String host,
-            int port,
-            String databaseName,
-            String collectionName,
-            boolean useRemoteSocket) {
-        this.host = host != null ? host.trim() : "127.0.0.1";
-        this.port = port > 0 ? port : 27017;
-        this.databaseName = (databaseName != null && !databaseName.trim().isEmpty())
-                ? databaseName.trim()
-                : DEFAULT_DATABASE;
-        this.collectionName = (collectionName != null && !collectionName.trim().isEmpty())
+    public MongoTreatmentRepository(MongoDatabase database, String collectionName) {
+        if (database == null) {
+            throw new IllegalArgumentException("Database não pode ser null");
+        }
+        String resolvedCollection = (collectionName != null && !collectionName.isBlank())
                 ? collectionName.trim()
                 : DEFAULT_COLLECTION;
-        this.useRemoteSocket = useRemoteSocket;
+        this.collection = database.getCollection(resolvedCollection);
+        this.databaseName = database.getName();
+        this.collectionName = resolvedCollection;
+        ensureIndexes();
+    }
+
+    /**
+     * Cria o repositório diretamente a partir de uma {@link MongoCollection}.
+     */
+    public MongoTreatmentRepository(MongoCollection<Document> collection) {
+        if (collection == null) {
+            throw new IllegalArgumentException("Collection não pode ser null");
+        }
+        this.collection = collection;
+        this.databaseName = collection.getNamespace().getDatabaseName();
+        this.collectionName = collection.getNamespace().getCollectionName();
+        ensureIndexes();
+    }
+
+    private void ensureIndexes() {
+        // Índice para consultas de tratamentos por titular (userId)
+        this.collection.createIndex(Indexes.ascending("userId"));
     }
 
     public String getDatabaseName() {
@@ -92,37 +99,38 @@ public class MongoTreatmentRepository implements TreatmentRepository {
     }
 
     @Override
-    public synchronized Treatment save(Treatment treatment) {
+    public Treatment save(Treatment treatment) {
         Objects.requireNonNull(treatment, "treatment não pode ser null");
         validateTreatmentDomain(treatment);
 
-        Map<String, Object> document = toDocument(treatment);
-        String id = (String) document.get("_id");
-
-        if (useRemoteSocket && isMongoServerReachable()) {
-            insertDocumentOnMongoServer(document);
+        Document document = toDocument(treatment);
+        try {
+            collection.insertOne(document);
+        } catch (MongoWriteException e) {
+            if (e.getError() != null && e.getError().getCode() == 11000) {
+                throw new IllegalArgumentException(
+                        "Já existe um tratamento cadastrado com o ID: " + treatment.getId(), e);
+            }
+            throw e;
         }
-        documentCollection.put(id, deepCopyDocument(document));
 
         return fromDocument(document);
     }
 
     @Override
-    public synchronized Optional<Treatment> findById(String id) {
-        if (id == null || id.trim().isEmpty()) {
+    public Optional<Treatment> findById(String id) {
+        if (id == null || id.isBlank()) {
             return Optional.empty();
         }
-        String normalizedId = id.trim();
-
-        Map<String, Object> stored = documentCollection.get(normalizedId);
+        Document stored = collection.find(Filters.eq("_id", id.trim())).first();
         if (stored == null) {
             return Optional.empty();
         }
-        return Optional.of(fromDocument(deepCopyDocument(stored)));
+        return Optional.of(fromDocument(stored));
     }
 
     @Override
-    public synchronized List<Treatment> findByUserId(String userId) {
+    public List<Treatment> findByUserId(String userId) {
         Objects.requireNonNull(userId, "userId não pode ser null");
         String normalizedUserId = userId.trim();
         if (normalizedUserId.isEmpty()) {
@@ -130,33 +138,37 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         }
 
         List<Treatment> result = new ArrayList<>();
-        for (Map<String, Object> doc : documentCollection.values()) {
-            if (normalizedUserId.equals(doc.get("userId"))) {
-                result.add(fromDocument(deepCopyDocument(doc)));
-            }
+        for (Document doc : collection.find(Filters.eq("userId", normalizedUserId))) {
+            result.add(fromDocument(doc));
         }
         return Collections.unmodifiableList(result);
     }
 
     @Override
-    public synchronized Optional<Treatment> findByIdAndUserId(String id, String userId) {
-        if (id == null || id.trim().isEmpty() || userId == null || userId.trim().isEmpty()) {
+    public Optional<Treatment> findByIdAndUserId(String id, String userId) {
+        if (id == null || id.isBlank() || userId == null || userId.isBlank()) {
             return Optional.empty();
         }
-        Map<String, Object> doc = documentCollection.get(id.trim());
-        if (doc == null || !userId.trim().equals(doc.get("userId"))) {
+        Document stored = collection.find(
+                Filters.and(
+                        Filters.eq("_id", id.trim()),
+                        Filters.eq("userId", userId.trim())
+                )
+        ).first();
+
+        if (stored == null) {
             return Optional.empty();
         }
-        return Optional.of(fromDocument(deepCopyDocument(doc)));
+        return Optional.of(fromDocument(stored));
     }
 
     @Override
-    public synchronized Treatment update(Treatment treatment) {
+    public Treatment update(Treatment treatment) {
         Objects.requireNonNull(treatment, "treatment não pode ser null");
         validateTreatmentDomain(treatment);
 
         String id = treatment.getId();
-        Map<String, Object> existingDoc = documentCollection.get(id);
+        Document existingDoc = collection.find(Filters.eq("_id", id)).first();
         if (existingDoc == null) {
             throw new NoSuchElementException("Tratamento não encontrado para atualização: " + id);
         }
@@ -168,13 +180,24 @@ public class MongoTreatmentRepository implements TreatmentRepository {
             );
         }
 
-        Treatment mergedTreatment = preserveMedicationAndScheduleHistory(existingTreatment, treatment);
-        Map<String, Object> updatedDoc = toDocument(mergedTreatment);
-
-        if (useRemoteSocket && isMongoServerReachable()) {
-            updateDocumentOnMongoServer(id, updatedDoc);
+        if (existingTreatment.getStatus() == TreatmentStatus.CLOSED) {
+            throw new IllegalStateException("Tratamento encerrado não pode ser alterado");
         }
-        documentCollection.put(id, deepCopyDocument(updatedDoc));
+
+        Treatment mergedTreatment = preserveMedicationAndScheduleHistory(existingTreatment, treatment);
+        Document updatedDoc = toDocument(mergedTreatment);
+
+        UpdateResult updateResult = collection.replaceOne(
+                Filters.and(
+                        Filters.eq("_id", id),
+                        Filters.eq("userId", existingTreatment.getUserId())
+                ),
+                updatedDoc
+        );
+
+        if (updateResult.getMatchedCount() == 0) {
+            throw new NoSuchElementException("Tratamento não encontrado para atualização: " + id);
+        }
 
         return fromDocument(updatedDoc);
     }
@@ -192,7 +215,7 @@ public class MongoTreatmentRepository implements TreatmentRepository {
             Optional<MedicamentoEmUso> existingMedOpt =
                     existingTreatment.findMedicationById(incomingMed.getId());
 
-            if (!existingMedOpt.isPresent()) {
+            if (existingMedOpt.isEmpty()) {
                 mergedMedications.add(incomingMed);
             } else {
                 MedicamentoEmUso existingMed = existingMedOpt.get();
@@ -219,14 +242,17 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 incomingTreatment.getUserId(),
                 incomingTreatment.getName(),
                 incomingTreatment.getDescription(),
-                incomingTreatment.isActive(),
+                incomingTreatment.getStartDate(),
+                incomingTreatment.getEndDate(),
+                incomingTreatment.getStatus(),
+                incomingTreatment.getClosedAt(),
                 mergedMedications
         );
     }
 
     /**
      * Combina a lista histórica de cronogramas já persistida com os novos cronogramas,
-     * garantindo que versões passadas nunca sejam destruídas.
+     * garantindo que versões passadas nunca sejam destruídas nem reativadas.
      */
     private List<CronogramaDose> mergeSchedules(
             List<CronogramaDose> existingSchedules,
@@ -249,6 +275,11 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         for (CronogramaDose incoming : incomingSchedules) {
             int matchIndex = findMatchingVersionAndDefinition(history, incoming);
             if (matchIndex >= 0) {
+                CronogramaDose existing = history.get(matchIndex);
+                if (!existing.isActive() && incoming.isActive()) {
+                    throw new IllegalArgumentException(
+                            "Não é permitido reativar uma versão histórica do cronograma");
+                }
                 history.set(matchIndex, incoming);
                 continue;
             }
@@ -293,108 +324,137 @@ public class MongoTreatmentRepository implements TreatmentRepository {
     }
 
     private void validateTreatmentDomain(Treatment treatment) {
-        if (treatment.getUserId() == null || treatment.getUserId().trim().isEmpty()) {
+        if (treatment.getUserId() == null || treatment.getUserId().isBlank()) {
             throw new IllegalArgumentException("Treatment deve estar associado a um userId válido");
         }
-        if (treatment.getName() == null || treatment.getName().trim().isEmpty()) {
-            throw new IllegalArgumentException("Treatment deve possuir um nome válido");
+        if (treatment.getStatus() == null) {
+            throw new IllegalArgumentException("Treatment deve possuir um status válido");
+        }
+        if (treatment.getStatus() != TreatmentStatus.DRAFT
+                && (treatment.getName() == null || treatment.getName().isBlank())) {
+            throw new IllegalArgumentException("Tratamento ativo ou encerrado deve possuir um nome válido");
         }
     }
 
     /**
-     * Converte a entidade Treatment e seus subdocumentos para um documento MongoDB.
+     * Converte a entidade Treatment e seus subdocumentos para um {@link Document} BSON do MongoDB.
      */
-    public Map<String, Object> toDocument(Treatment treatment) {
-        Map<String, Object> doc = new LinkedHashMap<>();
-        doc.put("_id", treatment.getId());
-        doc.put("userId", treatment.getUserId());
-        doc.put("name", treatment.getName());
-        doc.put("description", treatment.getDescription());
-        doc.put("active", treatment.isActive());
+    public Document toDocument(Treatment treatment) {
+        Objects.requireNonNull(treatment, "treatment não pode ser null");
 
-        List<Map<String, Object>> medicationDocs = new ArrayList<>();
+        Document doc = new Document()
+                .append("_id", treatment.getId())
+                .append("userId", treatment.getUserId())
+                .append("name", treatment.getName())
+                .append("description", treatment.getDescription())
+                .append("startDate", treatment.getStartDate() != null
+                        ? treatment.getStartDate().toString()
+                        : null)
+                .append("endDate", treatment.getEndDate() != null
+                        ? treatment.getEndDate().toString()
+                        : null)
+                .append("status", treatment.getStatus().name())
+                .append("closedAt", treatment.getClosedAt() != null
+                        ? Date.from(treatment.getClosedAt())
+                        : null);
+
+        List<Document> medicationDocs = new ArrayList<>();
+
         for (MedicamentoEmUso med : treatment.getMedications()) {
-            Map<String, Object> medDoc = new LinkedHashMap<>();
-            medDoc.put("id", med.getId());
-            medDoc.put("name", med.getName());
-            medDoc.put("dose", med.getDose());
-            medDoc.put("quantity", med.getQuantity());
-            medDoc.put("unit", med.getUnit());
-            medDoc.put("active", med.isActive());
-            medDoc.put("revision", med.getRevision());
-            medDoc.put("observations", med.getObservations());
 
-            List<Map<String, Object>> scheduleDocs = new ArrayList<>();
+            List<Document> scheduleDocs = new ArrayList<>();
+
+            // Serializa todas as versões dos cronogramas.
             for (CronogramaDose schedule : med.getSchedules()) {
-                Map<String, Object> schedDoc = new LinkedHashMap<>();
-                schedDoc.put("version", schedule.getVersion());
-                schedDoc.put(
-                        "daysOfWeek",
-                        schedule.getDaysOfWeek() != null
+                Document schedDoc = new Document()
+                        .append("version", schedule.getVersion())
+                        .append("daysOfWeek", schedule.getDaysOfWeek() != null
                                 ? new ArrayList<>(schedule.getDaysOfWeek())
-                                : null
-                );
-                schedDoc.put("times", new ArrayList<>(schedule.getTimes()));
-                schedDoc.put("startDate", schedule.getStartDate());
-                schedDoc.put("endDate", schedule.getEndDate());
-                schedDoc.put("timezone", schedule.getTimezone());
-                schedDoc.put("active", schedule.isActive());
+                                : null)
+                        .append("times", new ArrayList<>(schedule.getTimes()))
+                        .append("startDate", schedule.getStartDate())
+                        .append("endDate", schedule.getEndDate())
+                        .append("timezone", schedule.getTimezone())
+                        .append("active", schedule.isActive());
+
                 scheduleDocs.add(schedDoc);
             }
-            medDoc.put("schedules", scheduleDocs);
+
+            // Preserva os campos das duas branches.
+            Document medDoc = new Document()
+                    .append("id", med.getId())
+                    .append("name", med.getName())
+                    .append("dose", med.getDose())
+                    .append("quantity", med.getQuantity())
+                    .append("unit", med.getUnit())
+                    .append("active", med.isActive())
+                    .append("revision", med.getRevision())
+                    .append("observations", med.getObservations())
+                    .append("schedules", scheduleDocs);
+
             medicationDocs.add(medDoc);
         }
-        doc.put("medications", medicationDocs);
+
+        doc.append("medications", medicationDocs);
         return doc;
     }
 
     /**
-     * Reconstrói a entidade Treatment e seus subdocumentos a partir de um documento MongoDB.
+     * Reconstrói a entidade Treatment e seus subdocumentos a partir de um {@link Document} BSON do MongoDB.
      */
-    @SuppressWarnings("unchecked")
-    public Treatment fromDocument(Map<String, Object> doc) {
-        String id = (String) doc.get("_id");
-        String userId = (String) doc.get("userId");
-        String name = (String) doc.get("name");
-        String description = (String) doc.get("description");
-        boolean active = doc.get("active") instanceof Boolean ? (Boolean) doc.get("active") : true;
+    public Treatment fromDocument(Document doc) {
+        Objects.requireNonNull(doc, "doc não pode ser null");
+
+        String id = doc.getString("_id");
+        String userId = doc.getString("userId");
+        String name = doc.getString("name");
+        String description = doc.getString("description");
+        LocalDate startDate = parseLocalDate(doc.get("startDate"));
+        LocalDate endDate = parseLocalDate(doc.get("endDate"));
+        TreatmentStatus status = parseStatus(doc);
+        Instant closedAt = parseInstant(doc.get("closedAt"));
 
         List<MedicamentoEmUso> medications = new ArrayList<>();
-        List<Map<String, Object>> medicationDocs =
-                (List<Map<String, Object>>) doc.get("medications");
+        List<Document> medicationDocs = doc.getList("medications", Document.class);
 
         if (medicationDocs != null) {
-            for (Map<String, Object> medDoc : medicationDocs) {
-                String medId = (String) medDoc.get("id");
-                String medName = (String) medDoc.get("name");
-                String dose = (String) medDoc.get("dose");
-                Integer quantity = medDoc.get("quantity") instanceof Number
-                        ? ((Number) medDoc.get("quantity")).intValue()
-                        : null;
-                String observations = (String) medDoc.get("observations");
+            for (Document medDoc : medicationDocs) {
+                if (medDoc == null) {
+                    continue;
+                }
+                String medId = medDoc.getString("id");
+                String medName = medDoc.getString("name");
+                String dose = medDoc.getString("dose");
+                Integer quantity = parseQuantity(medDoc.get("quantity"));
+                String observations = medDoc.getString("observations");
 
                 List<CronogramaDose> schedules = new ArrayList<>();
-                List<Map<String, Object>> scheduleDocs =
-                        (List<Map<String, Object>>) medDoc.get("schedules");
+                List<Document> scheduleDocs = medDoc.getList("schedules", Document.class);
 
                 if (scheduleDocs != null) {
-                    for (Map<String, Object> schedDoc : scheduleDocs) {
-                        int version = ((Number) schedDoc.get("version")).intValue();
-                        List<String> daysOfWeek = (List<String>) schedDoc.get("daysOfWeek");
-                        List<String> times = (List<String>) schedDoc.get("times");
-                        String startDate = (String) schedDoc.get("startDate");
-                        String endDate = (String) schedDoc.get("endDate");
-                        String timezone = (String) schedDoc.get("timezone");
-                        boolean schedActive = schedDoc.get("active") instanceof Boolean
-                                ? (Boolean) schedDoc.get("active")
-                                : true;
+                    for (Document schedDoc : scheduleDocs) {
+                        if (schedDoc == null) {
+                            continue;
+                        }
+                        Object versionRaw = schedDoc.get("version");
+                        if (!(versionRaw instanceof Number)) {
+                            throw new IllegalArgumentException("Versão do cronograma inválida no documento MongoDB");
+                        }
+                        int version = ((Number) versionRaw).intValue();
+                        List<String> daysOfWeek = schedDoc.getList("daysOfWeek", String.class);
+                        List<String> times = schedDoc.getList("times", String.class);
+                        String schedStartDate = schedDoc.getString("startDate");
+                        String schedEndDate = schedDoc.getString("endDate");
+                        String timezone = schedDoc.getString("timezone");
+                        Boolean schedActiveRaw = schedDoc.getBoolean("active");
+                        boolean schedActive = schedActiveRaw != null ? schedActiveRaw : true;
 
                         schedules.add(new CronogramaDose(
                                 version,
                                 daysOfWeek != null ? new ArrayList<>(daysOfWeek) : null,
-                                new ArrayList<>(times),
-                                startDate,
-                                endDate,
+                                times != null ? new ArrayList<>(times) : Collections.emptyList(),
+                                schedStartDate,
+                                schedEndDate,
                                 timezone,
                                 schedActive
                         ));
@@ -415,244 +475,72 @@ public class MongoTreatmentRepository implements TreatmentRepository {
             }
         }
 
-        return new Treatment(id, userId, name, description, active, medications);
+        return new Treatment(
+                id,
+                userId,
+                name,
+                description,
+                startDate,
+                endDate,
+                status,
+                closedAt,
+                medications
+        );
     }
 
     /**
      * Exporta o documento MongoDB correspondente a um tratamento em formato JSON (Extended JSON).
      */
     public String toJsonDocument(Treatment treatment) {
-        return mapToJson(toDocument(treatment));
+        return toDocument(treatment).toJson();
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> deepCopyDocument(Map<String, Object> source) {
-        Map<String, Object> copy = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : source.entrySet()) {
-            copy.put(entry.getKey(), deepCopyValue(entry.getValue()));
+    private TreatmentStatus parseStatus(Document doc) {
+        String statusRaw = doc.getString("status");
+        if (statusRaw != null && !statusRaw.isBlank()) {
+            return TreatmentStatus.valueOf(statusRaw.trim());
         }
-        return copy;
+        throw new IllegalArgumentException("Status do tratamento ausente no documento MongoDB");
     }
 
-    @SuppressWarnings("unchecked")
-    private Object deepCopyValue(Object value) {
-        if (value instanceof Map) {
-            return deepCopyDocument((Map<String, Object>) value);
-        }
-        if (value instanceof List) {
-            List<Object> listCopy = new ArrayList<>();
-            for (Object item : (List<Object>) value) {
-                listCopy.add(deepCopyValue(item));
-            }
-            return listCopy;
-        }
-        return value;
-    }
-
-    @SuppressWarnings("unchecked")
-    private String mapToJson(Map<String, Object> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : map.entrySet()) {
-            if (!first) {
-                sb.append(",");
-            }
-            first = false;
-            sb.append(quoteJson(entry.getKey())).append(":").append(valueToJson(entry.getValue()));
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private String valueToJson(Object value) {
+    private LocalDate parseLocalDate(Object value) {
         if (value == null) {
-            return "null";
+            return null;
         }
         if (value instanceof String) {
-            return quoteJson((String) value);
+            String text = ((String) value).trim();
+            return text.isEmpty() ? null : LocalDate.parse(text);
         }
-        if (value instanceof Number || value instanceof Boolean) {
-            return value.toString();
+        if (value instanceof Date) {
+            return ((Date) value).toInstant().atZone(ZoneOffset.UTC).toLocalDate();
         }
-        if (value instanceof Map) {
-            return mapToJson((Map<String, Object>) value);
+        throw new IllegalArgumentException("Formato de data inválido no documento MongoDB");
+    }
+
+    private Instant parseInstant(Object value) {
+        if (value == null) {
+            return null;
         }
-        if (value instanceof List) {
-            StringBuilder sb = new StringBuilder("[");
-            List<Object> list = (List<Object>) value;
-            for (int i = 0; i < list.size(); i++) {
-                if (i > 0) {
-                    sb.append(",");
-                }
-                sb.append(valueToJson(list.get(i)));
-            }
-            sb.append("]");
-            return sb.toString();
+        if (value instanceof Date) {
+            return ((Date) value).toInstant();
         }
-        return quoteJson(value.toString());
-    }
-
-    private String quoteJson(String text) {
-        StringBuilder sb = new StringBuilder("\"");
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    sb.append(c);
-            }
+        if (value instanceof String) {
+            String text = ((String) value).trim();
+            return text.isEmpty() ? null : Instant.parse(text);
         }
-        sb.append("\"");
-        return sb.toString();
+        throw new IllegalArgumentException("Formato de instante inválido no documento MongoDB");
     }
 
-    // =========================================================================
-    // Suporte a MongoDB Wire Protocol (OP_MSG / BSON) via TCP Socket puro
-    // =========================================================================
-
-    private boolean isMongoServerReachable() {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), 500);
-            return true;
-        } catch (IOException e) {
-            return false;
+    private Integer parseQuantity(Object value) {
+        if (value == null) {
+            return null;
         }
-    }
-
-    private void insertDocumentOnMongoServer(Map<String, Object> document) {
-        Map<String, Object> command = new LinkedHashMap<>();
-        command.put("insert", collectionName);
-        command.put("documents", Collections.singletonList(document));
-        command.put("$db", databaseName);
-        sendOpMsg(command);
-    }
-
-    private void updateDocumentOnMongoServer(String id, Map<String, Object> document) {
-        Map<String, Object> query = new LinkedHashMap<>();
-        query.put("_id", id);
-
-        Map<String, Object> updateSpec = new LinkedHashMap<>();
-        updateSpec.put("q", query);
-        updateSpec.put("u", document);
-        updateSpec.put("upsert", true);
-
-        Map<String, Object> command = new LinkedHashMap<>();
-        command.put("update", collectionName);
-        command.put("updates", Collections.singletonList(updateSpec));
-        command.put("$db", databaseName);
-        sendOpMsg(command);
-    }
-
-    private void sendOpMsg(Map<String, Object> command) {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), 1500);
-            socket.setSoTimeout(2000);
-
-            byte[] bsonPayload = encodeBsonDocument(command);
-            int totalLength = 16 + 4 + 1 + bsonPayload.length;
-
-            ByteBuffer buffer = ByteBuffer.allocate(totalLength).order(ByteOrder.LITTLE_ENDIAN);
-            buffer.putInt(totalLength); // messageLength
-            buffer.putInt(1);           // requestID
-            buffer.putInt(0);           // responseTo
-            buffer.putInt(2013);        // opCode: OP_MSG (2013)
-            buffer.putInt(0);           // flagBits
-            buffer.put((byte) 0);       // section kind 0 (Body)
-            buffer.put(bsonPayload);
-
-            OutputStream out = socket.getOutputStream();
-            out.write(buffer.array());
-            out.flush();
-
-            InputStream in = socket.getInputStream();
-            DataInputStream dataIn = new DataInputStream(in);
-            int respLen = Integer.reverseBytes(dataIn.readInt());
-            if (respLen > 4 && respLen < 16 * 1024 * 1024) {
-                byte[] rest = new byte[respLen - 4];
-                dataIn.readFully(rest);
-            }
-        } catch (IOException ignored) {
-            // Mantém a operação resiliente com a coleção de documentos local
+        if (value instanceof Decimal128) {
+            return ((Decimal128) value).bigDecimalValue().intValueExact();
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private byte[] encodeBsonDocument(Map<String, Object> doc) throws IOException {
-        ByteArrayOutputStream body = new ByteArrayOutputStream();
-        for (Map.Entry<String, Object> entry : doc.entrySet()) {
-            String key = entry.getKey();
-            Object val = entry.getValue();
-            if (val == null) {
-                body.write(0x0A); // Null
-                writeCString(body, key);
-            } else if (val instanceof String) {
-                body.write(0x02); // UTF-8 string
-                writeCString(body, key);
-                writeBsonString(body, (String) val);
-            } else if (val instanceof Integer) {
-                body.write(0x10); // int32
-                writeCString(body, key);
-                writeInt32LE(body, (Integer) val);
-            } else if (val instanceof Boolean) {
-                body.write(0x08); // boolean
-                writeCString(body, key);
-                body.write(((Boolean) val) ? 1 : 0);
-            } else if (val instanceof Map) {
-                body.write(0x03); // embedded document
-                writeCString(body, key);
-                body.write(encodeBsonDocument((Map<String, Object>) val));
-            } else if (val instanceof List) {
-                body.write(0x04); // array
-                writeCString(body, key);
-                Map<String, Object> arrayMap = new LinkedHashMap<>();
-                List<Object> list = (List<Object>) val;
-                for (int i = 0; i < list.size(); i++) {
-                    arrayMap.put(String.valueOf(i), list.get(i));
-                }
-                body.write(encodeBsonDocument(arrayMap));
-            }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
         }
-        body.write(0x00); // EOO
-
-        byte[] bodyBytes = body.toByteArray();
-        ByteArrayOutputStream full = new ByteArrayOutputStream(4 + bodyBytes.length);
-        writeInt32LE(full, 4 + bodyBytes.length);
-        full.write(bodyBytes);
-        return full.toByteArray();
-    }
-
-    private void writeCString(ByteArrayOutputStream out, String str) throws IOException {
-        out.write(str.getBytes(StandardCharsets.UTF_8));
-        out.write(0x00);
-    }
-
-    private void writeBsonString(ByteArrayOutputStream out, String str) throws IOException {
-        byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
-        writeInt32LE(out, bytes.length + 1);
-        out.write(bytes);
-        out.write(0x00);
-    }
-
-    private void writeInt32LE(ByteArrayOutputStream out, int value) {
-        out.write(value & 0xFF);
-        out.write((value >> 8) & 0xFF);
-        out.write((value >> 16) & 0xFF);
-        out.write((value >> 24) & 0xFF);
+        throw new IllegalArgumentException("Formato de quantidade inválido no documento MongoDB");
     }
 }
-

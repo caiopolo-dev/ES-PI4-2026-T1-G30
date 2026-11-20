@@ -1,12 +1,18 @@
+//Autores: Cauã Bianchi Ferroni, Miguel Batista Gallinucci
 package backend.tests;
 
 import backend.auth.AccessDeniedException;
 import backend.http.HttpRequest;
 import backend.http.HttpResponse;
 import backend.models.Treatment;
-import backend.repositories.MongoTreatmentRepository;
+import backend.models.TreatmentStatus;
+import backend.repositories.TreatmentRepository;
 import backend.router.Router;
 import backend.services.TreatmentAccessService;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,8 +20,38 @@ import static org.junit.jupiter.api.Assertions.*;
 class AccessErrorResponseTest {
     @Test
     void foreignAndMissingResourceHaveIdentical404Response() {
-        var repository = new MongoTreatmentRepository();
-        repository.save(new Treatment("private-a", "user-a", "Private treatment"));
+        Map<String, Treatment> storage = new LinkedHashMap<>();
+        TreatmentRepository repository = new TreatmentRepository() {
+            @Override
+            public Treatment save(Treatment treatment) {
+                storage.put(treatment.getId(), treatment);
+                return treatment;
+            }
+
+            @Override
+            public Optional<Treatment> findById(String id) {
+                return Optional.ofNullable(storage.get(id));
+            }
+
+            @Override
+            public List<Treatment> findByUserId(String userId) {
+                return storage.values().stream()
+                    .filter(treatment -> userId.equals(treatment.getUserId()))
+                    .toList();
+            }
+
+            @Override
+            public Treatment update(Treatment treatment) {
+                if (!storage.containsKey(treatment.getId())) {
+                    throw new NoSuchElementException();
+                }
+                storage.put(treatment.getId(), treatment);
+                return treatment;
+            }
+        };
+        repository.save(new Treatment(
+            "private-a", "user-a", "Private treatment", null,
+            null, null, TreatmentStatus.DRAFT, null, List.of()));
         var service = new TreatmentAccessService(repository);
         var router = new Router(request -> Optional.of("user-b"));
         router.register("GET", "/foreign", request -> {
