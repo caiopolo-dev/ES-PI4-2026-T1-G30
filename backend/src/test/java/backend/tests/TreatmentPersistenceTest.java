@@ -1,48 +1,115 @@
+//Autor: Cauã Bianchi Ferroni
 package backend.tests;
 
+import backend.config.MongoConnection;
 import backend.models.CronogramaDose;
 import backend.models.MedicamentoEmUso;
 import backend.models.Treatment;
+import backend.models.TreatmentStatus;
 import backend.repositories.MongoTreatmentRepository;
-import backend.repositories.TreatmentRepository;
+
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Filters;
+
+import org.bson.Document;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
-import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Testes de unidade e integração da persistência de tratamentos,
- * medicamentos em uso e versionamento de cronogramas (Issue #16).
+ * Testes de integração da persistência de tratamentos, medicamentos em uso,
+ * ciclo de vida (DRAFT -> ACTIVE -> CLOSED) e versionamento de cronogramas no MongoDB.
  */
 public class TreatmentPersistenceTest {
 
-    public static void main(String[] args) {
-        testMinimumScenarioFromIssue();
-        System.out.println("PASS: Cenário mínimo (Tratamento A -> Medicamento X -> 08:00 / 20:00)");
+    private String mongoUri;
+    private String databaseName;
+    private MongoConnection connection;
+    private MongoTreatmentRepository repository;
 
-        testScheduleVersioningPreservesHistory();
-        System.out.println("PASS: Preservação de versões históricas de CronogramaDose (v1 -> v2 -> v3)");
+    @BeforeEach
+    void preparar() {
+        mongoUri = resolveMongoUri();
 
-        testRepositoryAutomaticHistoryPreservationOnUpdate();
-        System.out.println("PASS: Preservação automática de histórico pelo MongoTreatmentRepository.update()");
+        // Executa os testes de integração somente quando o MongoDB estiver configurado
+        assumeTrue(mongoUri != null && !mongoUri.isBlank(),
+                "MONGODB_URI não configurada para testes de integração com MongoDB");
 
-        testUserAssociationAndFiltering();
-        System.out.println("PASS: Validação de associação ao usuário e consulta por findByUserId()");
+        // Cria um banco temporário e isolado para cada teste
+        databaseName = "dosecerta_test_treatments_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
-        testMongoDocumentMappingAndIsolation();
-        System.out.println("PASS: Mapeamento de documento MongoDB (_id, medications, schedules) e isolamento");
+        connection = new MongoConnection(mongoUri, databaseName);
+        repository = new MongoTreatmentRepository(connection.getDatabase());
+    }
 
-        System.out.println("\nTodos os testes da Issue #16 executados com sucesso!");
+    @AfterEach
+    void limpar() {
+        if (connection != null) {
+            try {
+                // Remove apenas o banco temporário criado para este teste
+                if (connection.getDatabase() != null
+                        && connection.getDatabase().getName().startsWith("dosecerta_test_")) {
+                    connection.getDatabase().drop();
+                }
+            } finally {
+                connection.close();
+            }
+        }
+    }
+
+    private String resolveMongoUri() {
+        String uri = System.getenv("MONGODB_URI");
+        if (uri == null || uri.isBlank()) {
+            uri = System.getProperty("MONGODB_URI");
+        }
+        if ((uri == null || uri.isBlank())
+                && "true".equalsIgnoreCase(System.getProperty("mongo.integration"))) {
+            uri = "mongodb://127.0.0.1:27017";
+        }
+        return uri;
+    }
+
+    @Test
+    void deveConectarNoMongoDBECriarIndiceDeUserId() {
+        Document ping = connection.getDatabase().runCommand(new Document("ping", 1));
+        assertEquals(1.0, ((Number) ping.get("ok")).doubleValue(), 0.001);
+
+        assertEquals(databaseName, repository.getDatabaseName());
+        assertEquals(MongoTreatmentRepository.DEFAULT_COLLECTION, repository.getCollectionName());
+
+        MongoCollection<Document> collection = connection.getCollection(MongoTreatmentRepository.DEFAULT_COLLECTION);
+        List<Document> indexes = new ArrayList<>();
+        collection.listIndexes().into(indexes);
+
+        boolean possuiIndiceUserId = indexes.stream().anyMatch(index -> {
+            Document key = index.get("key", Document.class);
+            return key != null && Integer.valueOf(1).equals(key.getInteger("userId"));
+        });
+
+        assertTrue(possuiIndiceUserId, "Collection treatments deve possuir índice em userId");
     }
 
     /**
-     * Valida o "Teste mínimo" especificado na Issue #16:
-     * Tratamento A -> Medicamento X (dose: 1 unidade, horários: 08:00 / 20:00).
+     * Valida o cenário mínimo (Tratamento A -> Medicamento X -> 08:00 / 20:00)
+     * comprovando a gravação direta na collection MongoDB e a recuperação por uma nova conexão.
      */
-    private static void testMinimumScenarioFromIssue() {
-        TreatmentRepository repository = new MongoTreatmentRepository();
-
+    @Test
+    void devePersistirERecuperarCenarioMinimoNoMongoDB() {
         CronogramaDose scheduleV1 = new CronogramaDose(
                 1,
                 Arrays.asList("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"),
@@ -67,108 +134,209 @@ public class TreatmentPersistenceTest {
                 "usuario-01",
                 "Tratamento A",
                 "Tratamento inicial de uso contínuo",
-                true,
+                LocalDate.of(2026, 10, 29),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
                 Collections.singletonList(medicamentoX)
         );
 
         repository.save(tratamentoA);
 
-        Optional<Treatment> recoveredOpt = repository.findById("trat-a");
-        check(recoveredOpt.isPresent(), "Tratamento A deve ser recuperado pelo ID");
+        // Confirma a persistência diretamente na collection treatments do MongoDB
+        MongoCollection<Document> collection = connection.getCollection(MongoTreatmentRepository.DEFAULT_COLLECTION);
+        Document rawDoc = collection.find(Filters.eq("_id", "trat-a")).first();
+        assertNotNull(rawDoc, "Documento deve existir fisicamente na collection treatments");
+        assertEquals("trat-a", rawDoc.getString("_id"));
+        assertEquals("usuario-01", rawDoc.getString("userId"));
+        assertEquals("Tratamento A", rawDoc.getString("name"));
+        assertEquals("2026-10-29", rawDoc.getString("startDate"));
+        assertNull(rawDoc.get("endDate"));
+        assertEquals("ACTIVE", rawDoc.getString("status"));
+        assertNull(rawDoc.get("closedAt"));
 
-        Treatment recovered = recoveredOpt.get();
-        // 1. Dados do tratamento permanecem
-        check("trat-a".equals(recovered.getId()), "ID do tratamento deve permanecer");
-        check("usuario-01".equals(recovered.getUserId()), "userId do tratamento deve permanecer");
-        check("Tratamento A".equals(recovered.getName()), "Nome do tratamento deve permanecer");
-        check(recovered.isActive(), "Status ativo do tratamento deve permanecer");
+        // Abre uma segunda conexão independente para comprovar que os dados vêm do banco e não de memória
+        try (MongoConnection novaConexao = new MongoConnection(mongoUri, databaseName)) {
+            MongoTreatmentRepository novoRepositorio = new MongoTreatmentRepository(novaConexao.getDatabase());
+            Optional<Treatment> recoveredOpt = novoRepositorio.findById("trat-a");
+            assertTrue(recoveredOpt.isPresent(), "Tratamento A deve ser recuperado por outra conexão MongoDB");
 
-        // 2. Medicamento permanece associado
-        check(recovered.getMedications().size() == 1, "Deve possuir 1 medicamento associado");
-        MedicamentoEmUso recoveredMed = recovered.getMedications().get(0);
-        check("med-x".equals(recoveredMed.getId()), "ID do medicamento em uso deve permanecer");
-        check("Medicamento X".equals(recoveredMed.getName()), "Nome do medicamento deve permanecer");
-        check("1 unidade".equals(recoveredMed.getDose()), "Dose '1 unidade' deve permanecer");
-        check(Integer.valueOf(1).equals(recoveredMed.getQuantity()), "Quantidade deve permanecer 1");
-        check("Tomar após as refeições".equals(recoveredMed.getObservations()), "Observações devem permanecer");
+            Treatment recovered = recoveredOpt.get();
+            assertEquals("trat-a", recovered.getId());
+            assertEquals("usuario-01", recovered.getUserId());
+            assertEquals("Tratamento A", recovered.getName());
+            assertEquals("Tratamento inicial de uso contínuo", recovered.getDescription());
+            assertEquals(LocalDate.of(2026, 10, 29), recovered.getStartDate());
+            assertNull(recovered.getEndDate());
+            assertEquals(TreatmentStatus.ACTIVE, recovered.getStatus());
+            assertNull(recovered.getClosedAt());
 
-        // 3. Cronograma permanece associado
-        check(recoveredMed.getSchedules().size() == 1, "Deve possuir 1 cronograma associado");
-        Optional<CronogramaDose> activeSchedOpt = recoveredMed.getActiveSchedule();
-        check(activeSchedOpt.isPresent(), "Cronograma ativo deve estar disponível");
-        CronogramaDose recoveredSchedule = activeSchedOpt.get();
-        check(Arrays.asList("08:00", "20:00").equals(recoveredSchedule.getTimes()),
-                "Horários 08:00 / 20:00 devem permanecer");
-        check("2026-10-29".equals(recoveredSchedule.getStartDate()), "startDate deve permanecer");
-        check("America/Sao_Paulo".equals(recoveredSchedule.getTimezone()), "timezone deve permanecer");
-        check(recoveredSchedule.isActive(), "Cronograma deve estar marcado como ativo");
+            assertEquals(1, recovered.getMedications().size());
+            MedicamentoEmUso recoveredMed = recovered.getMedications().get(0);
+            assertEquals("med-x", recoveredMed.getId());
+            assertEquals("Medicamento X", recoveredMed.getName());
+            assertEquals("1 unidade", recoveredMed.getDose());
+            assertEquals(Integer.valueOf(1), recoveredMed.getQuantity());
+            assertEquals("Tomar após as refeições", recoveredMed.getObservations());
 
-        // 4. Versão do cronograma permanece disponível
-        check(recoveredSchedule.getVersion() == 1, "Versão 1 do cronograma deve permanecer disponível");
+            assertEquals(1, recoveredMed.getSchedules().size());
+            CronogramaDose recoveredSchedule = recoveredMed.getActiveSchedule().orElseThrow();
+            assertEquals(1, recoveredSchedule.getVersion());
+            assertEquals(Arrays.asList("08:00", "20:00"), recoveredSchedule.getTimes());
+            assertEquals("2026-10-29", recoveredSchedule.getStartDate());
+            assertEquals("America/Sao_Paulo", recoveredSchedule.getTimezone());
+            assertTrue(recoveredSchedule.isActive());
+        }
     }
 
     /**
-     * Valida a evolução de versões de cronograma:
-     * Schedule v1 (08:00 / 20:00) -> alteração -> Schedule v2 (08:00 / 21:00) -> Schedule v3.
+     * Valida a persistência completa do ciclo de vida (DRAFT incompleto -> ACTIVE -> CLOSED)
+     * e a imutabilidade de tratamentos encerrados no MongoDB.
      */
-    private static void testScheduleVersioningPreservesHistory() {
-        TreatmentRepository repository = new MongoTreatmentRepository();
+    @Test
+    void devePersistirRascunhoIncompletoECicloDeVidaCompletoNoMongoDB() {
+        Treatment rascunho = new Treatment("usuario-ciclo", null, null, null, null);
+        Treatment salvo = repository.save(rascunho);
 
+        MongoCollection<Document> collection = connection.getCollection(MongoTreatmentRepository.DEFAULT_COLLECTION);
+        Document draftDoc = collection.find(Filters.eq("_id", salvo.getId())).first();
+        assertNotNull(draftDoc);
+        assertEquals("DRAFT", draftDoc.getString("status"));
+        assertNull(draftDoc.getString("name"));
+        assertNull(draftDoc.get("startDate"));
+
+        // Atualiza metadados, período e adiciona medicamento com cronograma válido
+        Treatment paraAtivar = repository.findById(salvo.getId()).orElseThrow();
+        paraAtivar.setName("Tratamento Hipertensão");
+        paraAtivar.setDescription("Uso diário");
+        paraAtivar.updatePeriod(LocalDate.of(2026, 11, 19), LocalDate.of(2026, 12, 19));
+
+        CronogramaDose cronograma = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-19",
+                "America/Sao_Paulo"
+        );
+        paraAtivar.addMedication(new MedicamentoEmUso("med-1", "Losartana", "50 mg", 1, null, cronograma));
+        paraAtivar.activate();
+
+        repository.update(paraAtivar);
+
+        Document activeDoc = collection.find(Filters.eq("_id", salvo.getId())).first();
+        assertNotNull(activeDoc);
+        assertEquals("ACTIVE", activeDoc.getString("status"));
+        assertEquals("Tratamento Hipertensão", activeDoc.getString("name"));
+        assertEquals("2026-11-19", activeDoc.getString("startDate"));
+        assertEquals("2026-12-19", activeDoc.getString("endDate"));
+
+        // Encerra o tratamento e confirma persistência de closedAt como Date BSON
+        Instant closedAt = Instant.parse("2026-11-20T15:30:00Z");
+        Treatment paraEncerrar = repository.findById(salvo.getId()).orElseThrow();
+        paraEncerrar.close(closedAt);
+        repository.update(paraEncerrar);
+
+        Document closedDoc = collection.find(Filters.eq("_id", salvo.getId())).first();
+        assertNotNull(closedDoc);
+        assertEquals("CLOSED", closedDoc.getString("status"));
+        assertEquals(Date.from(closedAt), closedDoc.getDate("closedAt"));
+
+        Treatment encerradoRecuperado = repository.findById(salvo.getId()).orElseThrow();
+        assertEquals(TreatmentStatus.CLOSED, encerradoRecuperado.getStatus());
+        assertEquals(closedAt, encerradoRecuperado.getClosedAt());
+        assertEquals(1, encerradoRecuperado.getMedications().size());
+
+        // Não permite atualizar um tratamento já encerrado no banco
+        Treatment tentativaAlteracao = new Treatment(
+                salvo.getId(),
+                "usuario-ciclo",
+                "Tentativa de reabrir",
+                "Uso diário",
+                LocalDate.of(2026, 11, 19),
+                LocalDate.of(2026, 12, 19),
+                TreatmentStatus.ACTIVE,
+                null,
+                encerradoRecuperado.getMedications()
+        );
+        assertThrows(IllegalStateException.class, () -> repository.update(tentativaAlteracao));
+        assertEquals(TreatmentStatus.CLOSED, repository.findById(salvo.getId()).orElseThrow().getStatus());
+    }
+
+    /**
+     * Valida a evolução de versões de cronograma no MongoDB:
+     * Schedule v1 (08:00 / 20:00) -> Schedule v2 (08:00 / 21:00) -> Schedule v3.
+     */
+    @Test
+    void devePreservarHistoricoDeVersoesDeCronogramaNoMongoDB() {
         CronogramaDose v1 = new CronogramaDose(
                 Arrays.asList("08:00", "20:00"),
                 "2026-10-01",
                 "America/Sao_Paulo"
         );
         MedicamentoEmUso med = new MedicamentoEmUso("med-1", "Losartana 50mg", "1 comprimido", v1);
-        Treatment treatment = new Treatment("trat-hist", "user-10", "Controle Pressão", Collections.singletonList(med));
+        Treatment treatment = new Treatment(
+                "trat-hist",
+                "user-10",
+                "Controle Pressão",
+                null,
+                LocalDate.of(2026, 10, 1),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
+                Collections.singletonList(med)
+        );
 
         repository.save(treatment);
 
         // Alteração 1: mudar horário de 08:00 / 20:00 para 08:00 / 21:00 (gera Schedule v2)
-        Treatment toUpdate = repository.findById("trat-hist").get();
+        Treatment toUpdate = repository.findById("trat-hist").orElseThrow();
         MedicamentoEmUso medToUpdate = toUpdate.getMedications().get(0);
         medToUpdate.updateScheduleTimes(Arrays.asList("08:00", "21:00"), "2026-10-15");
+        toUpdate.addMedication(medToUpdate);
         repository.update(toUpdate);
 
-        Treatment afterV2 = repository.findById("trat-hist").get();
+        Treatment afterV2 = repository.findById("trat-hist").orElseThrow();
         MedicamentoEmUso medAfterV2 = afterV2.getMedications().get(0);
-        check(medAfterV2.getSchedules().size() == 2, "Histórico deve conter 2 versões (v1 e v2)");
+        assertEquals(2, medAfterV2.getSchedules().size());
 
-        CronogramaDose storedV1 = medAfterV2.getScheduleByVersion(1).orElse(null);
-        CronogramaDose storedV2 = medAfterV2.getScheduleByVersion(2).orElse(null);
-        check(storedV1 != null, "Versão 1 ainda deve existir no histórico");
-        check(!storedV1.isActive(), "Versão 1 deve estar inativa após criação da v2");
-        check(Arrays.asList("08:00", "20:00").equals(storedV1.getTimes()),
-                "Horários originais da v1 (08:00 / 20:00) devem ser preservados");
-
-        check(storedV2 != null, "Versão 2 deve existir");
-        check(storedV2.isActive(), "Versão 2 deve ser a versão ativa");
-        check(Arrays.asList("08:00", "21:00").equals(storedV2.getTimes()),
-                "Horários da v2 devem ser 08:00 / 21:00");
+        CronogramaDose storedV1 = medAfterV2.getScheduleByVersion(1).orElseThrow();
+        CronogramaDose storedV2 = medAfterV2.getScheduleByVersion(2).orElseThrow();
+        assertFalse(storedV1.isActive());
+        assertEquals(Arrays.asList("08:00", "20:00"), storedV1.getTimes());
+        assertTrue(storedV2.isActive());
+        assertEquals(Arrays.asList("08:00", "21:00"), storedV2.getTimes());
 
         // Alteração 2: mudar frequência (daysOfWeek), quantidade e vigência (gera Schedule v3)
         medAfterV2.setQuantity(2);
         medAfterV2.updateSchedule(
                 Arrays.asList("MONDAY", "WEDNESDAY", "FRIDAY"),
-                Arrays.asList("09:00"),
+                Collections.singletonList("09:00"),
                 "2026-11-01",
                 "2026-12-31",
                 "America/Sao_Paulo"
         );
+        afterV2.addMedication(medAfterV2);
         repository.update(afterV2);
 
-        Treatment afterV3 = repository.findById("trat-hist").get();
+        Treatment afterV3 = repository.findById("trat-hist").orElseThrow();
         MedicamentoEmUso medAfterV3 = afterV3.getMedications().get(0);
-        check(medAfterV3.getSchedules().size() == 3, "Histórico deve conter 3 versões (v1, v2 e v3)");
-        check(Integer.valueOf(2).equals(medAfterV3.getQuantity()), "Quantidade atualizada deve ser persistida");
-        check(!medAfterV3.getScheduleByVersion(1).get().isActive(), "v1 permanece inativa");
-        check(!medAfterV3.getScheduleByVersion(2).get().isActive(), "v2 passa a ficar inativa");
+        assertEquals(3, medAfterV3.getSchedules().size());
+        assertEquals(Integer.valueOf(2), medAfterV3.getQuantity());
+        assertFalse(medAfterV3.getScheduleByVersion(1).orElseThrow().isActive());
+        assertFalse(medAfterV3.getScheduleByVersion(2).orElseThrow().isActive());
 
-        CronogramaDose storedV3 = medAfterV3.getActiveSchedule().get();
-        check(storedV3.getVersion() == 3, "Versão ativa deve ser a 3");
-        check(Arrays.asList("MONDAY", "WEDNESDAY", "FRIDAY").equals(storedV3.getDaysOfWeek()),
-                "Dias da semana da v3 devem ser preservados");
-        check("2026-12-31".equals(storedV3.getEndDate()), "Data de fim de vigência da v3 deve ser preservada");
+        CronogramaDose storedV3 = medAfterV3.getActiveSchedule().orElseThrow();
+        assertEquals(3, storedV3.getVersion());
+        assertEquals(Arrays.asList("MONDAY", "WEDNESDAY", "FRIDAY"), storedV3.getDaysOfWeek());
+        assertEquals("2026-12-31", storedV3.getEndDate());
+
+        // Confirma que as 3 versões estão fisicamente salvas no documento BSON do MongoDB
+        Document rawDoc = connection.getCollection(MongoTreatmentRepository.DEFAULT_COLLECTION)
+                .find(Filters.eq("_id", "trat-hist"))
+                .first();
+        assertNotNull(rawDoc);
+        List<Document> rawMeds = rawDoc.getList("medications", Document.class);
+        assertEquals(1, rawMeds.size());
+        List<Document> rawSchedules = rawMeds.get(0).getList("schedules", Document.class);
+        assertEquals(3, rawSchedules.size());
     }
 
     /**
@@ -176,9 +344,8 @@ public class TreatmentPersistenceTest {
      * contendo apenas o novo cronograma, o MongoTreatmentRepository.update() preserva as versões
      * anteriores já salvas no banco.
      */
-    private static void testRepositoryAutomaticHistoryPreservationOnUpdate() {
-        MongoTreatmentRepository repository = new MongoTreatmentRepository();
-
+    @Test
+    void devePreservarHistoricoAutomaticamenteNoUpdateMesmoEnviandoApenasNovoCronograma() {
         CronogramaDose initialSchedule = new CronogramaDose(
                 Arrays.asList("08:00", "20:00"),
                 "2026-10-01",
@@ -189,6 +356,11 @@ public class TreatmentPersistenceTest {
                 "trat-auto",
                 "user-99",
                 "Suplementação",
+                null,
+                LocalDate.of(2026, 10, 1),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
                 Collections.singletonList(initialMed)
         );
         repository.save(initialTreatment);
@@ -204,102 +376,125 @@ public class TreatmentPersistenceTest {
                 "trat-auto",
                 "user-99",
                 "Suplementação",
+                null,
+                LocalDate.of(2026, 10, 1),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
                 Collections.singletonList(updatedMed)
         );
         repository.update(updatedTreatment);
 
-        Treatment persisted = repository.findById("trat-auto").get();
+        Treatment persisted = repository.findById("trat-auto").orElseThrow();
         List<CronogramaDose> schedules = persisted.getMedications().get(0).getSchedules();
-        check(schedules.size() == 2, "Repositório deve preservar v1 e adicionar v2 automaticamente");
-        check(schedules.get(0).getVersion() == 1 && !schedules.get(0).isActive(),
-                "v1 preservada como inativa");
-        check(Arrays.asList("08:00", "20:00").equals(schedules.get(0).getTimes()),
-                "Horários de v1 intactos");
-        check(schedules.get(1).getVersion() == 2 && schedules.get(1).isActive(),
-                "v2 adicionada como ativa");
-        check(Arrays.asList("08:00", "21:00").equals(schedules.get(1).getTimes()),
-                "Horários de v2 persistidos");
+        assertEquals(2, schedules.size());
+        assertEquals(1, schedules.get(0).getVersion());
+        assertFalse(schedules.get(0).isActive());
+        assertEquals(Arrays.asList("08:00", "20:00"), schedules.get(0).getTimes());
+        assertEquals(2, schedules.get(1).getVersion());
+        assertTrue(schedules.get(1).isActive());
+        assertEquals(Arrays.asList("08:00", "21:00"), schedules.get(1).getTimes());
     }
 
     /**
-     * Valida a associação ao usuário titular e as consultas filtradas por findByUserId().
+     * Valida a associação ao usuário titular, consultas filtradas por findByUserId()
+     * e findByIdAndUserId(), e bloqueio de alteração de titular no MongoDB.
      */
-    private static void testUserAssociationAndFiltering() {
-        TreatmentRepository repository = new MongoTreatmentRepository();
-
-        Treatment t1UserA = new Treatment("t1", "user-A", "Tratamento 1 do Usuário A");
-        Treatment t2UserA = new Treatment("t2", "user-A", "Tratamento 2 do Usuário A");
-        Treatment t1UserB = new Treatment("t3", "user-B", "Tratamento 1 do Usuário B");
+    @Test
+    void deveFiltrarPorUsuarioEImpedirTrocaDeTitularNoMongoDB() {
+        Treatment t1UserA = new Treatment("t1", "user-A", "Tratamento 1 do Usuário A", null,
+                null, null, TreatmentStatus.DRAFT, null, Collections.emptyList());
+        Treatment t2UserA = new Treatment("t2", "user-A", "Tratamento 2 do Usuário A", null,
+                null, null, TreatmentStatus.DRAFT, null, Collections.emptyList());
+        Treatment t1UserB = new Treatment("t3", "user-B", "Tratamento 1 do Usuário B", null,
+                null, null, TreatmentStatus.DRAFT, null, Collections.emptyList());
 
         repository.save(t1UserA);
         repository.save(t2UserA);
         repository.save(t1UserB);
 
         List<Treatment> userATreatments = repository.findByUserId("user-A");
-        check(userATreatments.size() == 2, "Usuário A deve possuir exatamente 2 tratamentos");
-        check("t1".equals(userATreatments.get(0).getId()), "Primeiro tratamento de user-A deve ser t1");
-        check("t2".equals(userATreatments.get(1).getId()), "Segundo tratamento de user-A deve ser t2");
+        assertEquals(2, userATreatments.size());
+        assertTrue(userATreatments.stream().anyMatch(t -> "t1".equals(t.getId())));
+        assertTrue(userATreatments.stream().anyMatch(t -> "t2".equals(t.getId())));
 
         List<Treatment> userBTreatments = repository.findByUserId("user-B");
-        check(userBTreatments.size() == 1, "Usuário B deve possuir exatamente 1 tratamento");
-        check("t3".equals(userBTreatments.get(0).getId()), "Tratamento de user-B deve ser t3");
+        assertEquals(1, userBTreatments.size());
+        assertEquals("t3", userBTreatments.get(0).getId());
 
-        List<Treatment> unknownUserTreatments = repository.findByUserId("user-inexistente");
-        check(unknownUserTreatments.isEmpty(), "Usuário sem tratamentos deve retornar lista vazia");
-
-        check(repository.findByIdAndUserId("t1", "user-A").isPresent(),
-                "findByIdAndUserId deve encontrar quando titular corresponde");
-        check(!repository.findByIdAndUserId("t1", "user-B").isPresent(),
-                "findByIdAndUserId não deve retornar tratamento de outro titular");
+        assertTrue(repository.findByUserId("user-inexistente").isEmpty());
+        assertTrue(repository.findByIdAndUserId("t1", "user-A").isPresent());
+        assertTrue(repository.findByIdAndUserId("t1", "user-B").isEmpty());
 
         // Impedir troca de titular (userId) na atualização
-        try {
-            Treatment wrongOwnerUpdate = new Treatment("t1", "user-B", "Tentativa de troca de titular");
-            repository.update(wrongOwnerUpdate);
-            throw new AssertionError("Deveria rejeitar alteração de titular (userId)");
-        } catch (IllegalArgumentException expected) {
-            // Esperado
-        }
+        Treatment wrongOwnerUpdate = new Treatment("t1", "user-B", "Tentativa de troca de titular", null,
+                null, null, TreatmentStatus.DRAFT, null, Collections.emptyList());
+        assertThrows(IllegalArgumentException.class, () -> repository.update(wrongOwnerUpdate));
+
+        // Confirma no banco que o titular original não foi alterado
+        assertEquals("user-A", repository.findById("t1").orElseThrow().getUserId());
     }
 
     /**
-     * Verifica a estrutura de documento MongoDB gerada e o isolamento de referências em memória.
+     * Verifica o mapeamento de documento MongoDB, o isolamento de mutações em memória,
+     * a rejeição de IDs duplicados no save() e tratamento inexistente no update().
      */
-    private static void testMongoDocumentMappingAndIsolation() {
-        MongoTreatmentRepository repository = new MongoTreatmentRepository();
-
+    @Test
+    void deveIsolarMutacoesEmMemoriaERejeitarIdDuplicadoOuInexistente() {
         CronogramaDose schedule = new CronogramaDose(
                 Arrays.asList("07:00", "19:00"),
                 "2026-10-29",
                 "America/Sao_Paulo"
         );
         MedicamentoEmUso med = new MedicamentoEmUso("med-iso", "Amoxicilina", "500 mg", 21, "De 12 em 12h", schedule);
-        Treatment treatment = new Treatment("trat-iso", "user-iso", "Infecção", Collections.singletonList(med));
+        Treatment treatment = new Treatment(
+                "trat-iso",
+                "user-iso",
+                "Infecção",
+                null,
+                LocalDate.of(2026, 10, 29),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
+                Collections.singletonList(med)
+        );
 
         repository.save(treatment);
 
-        // Alterar o objeto em memória não deve alterar o documento salvo no banco sem chamar update()
+        // Alterar o objeto em memória não deve alterar o documento salvo no MongoDB sem chamar update()
         treatment.setName("Nome Modificado Apenas Em Memória");
         med.setDose("Dose Modificada Apenas Em Memória");
 
-        Treatment fromDb = repository.findById("trat-iso").get();
-        check("Infecção".equals(fromDb.getName()), "Documento persistido deve estar isolado de mutações externas");
-        check("500 mg".equals(fromDb.getMedications().get(0).getDose()),
-                "Subdocumento de medicamento deve estar isolado de mutações externas");
+        Treatment fromDb = repository.findById("trat-iso").orElseThrow();
+        assertEquals("Infecção", fromDb.getName());
+        assertEquals("500 mg", fromDb.getMedications().get(0).getDose());
 
-        Map<String, Object> rawDoc = repository.toDocument(fromDb);
-        check("trat-iso".equals(rawDoc.get("_id")), "Chave primária no documento MongoDB deve ser _id");
-        check("user-iso".equals(rawDoc.get("userId")), "Campo userId deve constar no documento MongoDB");
+        // ID duplicado deve ser rejeitado pelo MongoDB
+        assertThrows(IllegalArgumentException.class, () -> repository.save(fromDb));
+        assertEquals(1L, connection.getCollection(MongoTreatmentRepository.DEFAULT_COLLECTION).countDocuments());
+
+        // Atualização de tratamento inexistente deve lançar NoSuchElementException
+        Treatment inexistente = new Treatment(
+                "trat-inexistente",
+                "user-iso",
+                "Não salvo",
+                null,
+                null,
+                null,
+                TreatmentStatus.DRAFT,
+                null,
+                Collections.emptyList()
+        );
+        assertThrows(NoSuchElementException.class, () -> repository.update(inexistente));
+
+        Document rawDoc = repository.toDocument(fromDb);
+        assertEquals("trat-iso", rawDoc.getString("_id"));
+        assertEquals("user-iso", rawDoc.getString("userId"));
+        assertEquals("ACTIVE", rawDoc.getString("status"));
 
         String json = repository.toJsonDocument(fromDb);
-        check(json.contains("\"_id\":\"trat-iso\""), "JSON do documento MongoDB deve conter _id");
-        check(json.contains("\"schedules\":[{\"version\":1"), "JSON deve conter array de schedules versionado");
-    }
-
-    private static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError("Falha no teste: " + message);
-        }
+        assertTrue(json.contains("\"_id\": \"trat-iso\"") || json.contains("\"_id\":\"trat-iso\""));
+        assertTrue(json.contains("\"status\": \"ACTIVE\"") || json.contains("\"status\":\"ACTIVE\""));
+        assertTrue(json.contains("\"schedules\""));
     }
 }
-

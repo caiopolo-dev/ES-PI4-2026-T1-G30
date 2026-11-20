@@ -1,15 +1,21 @@
-
+//Autores: Cauã Bianchi Ferroni, Samuel Campovilla
 package backend.tests;
 
+import backend.config.MongoConnection;
 import backend.handlers.TreatmentHandler;
 import backend.http.HttpRequest;
 import backend.http.HttpResponse;
 import backend.models.*;
+import backend.repositories.MongoTreatmentRepository;
 import backend.repositories.TreatmentRepository;
 import backend.router.Router;
 import backend.services.TreatmentService;
 
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Filters;
+
 import org.bson.Document;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -17,59 +23,31 @@ import java.time.*;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 public class TreatmentHttpTest {
 
+    private String mongoUri;
+    private String databaseName;
+    private MongoConnection connection;
+    private TreatmentRepository repository;
     private Router router;
-    private Map<String, Treatment> dados;
     private String usuarioAutenticado;
 
     @BeforeEach
     void preparar() {
+        mongoUri = resolveMongoUri();
 
-        // HashMap armazena os tratamentos durante cada teste.
-        // Simula a persistência, mas não utiliza o MongoDB.
-        dados = new HashMap<>();
+        // Executa os testes HTTP integrados ao MongoDB somente quando o banco estiver configurado
+        assumeTrue(mongoUri != null && !mongoUri.isBlank(),
+                "MONGODB_URI não configurada para testes de integração com MongoDB");
 
-        // Implementação de teste da interface TreatmentRepository.
-        // Permite testar o Service sem depender da implementação Mongo.
-        TreatmentRepository repository = new TreatmentRepository() {
+        // Banco temporário e exclusivo para cada execução de teste
+        databaseName = "dosecerta_test_http_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
-            @Override
-            public Treatment save(Treatment treatment) {
-                dados.put(treatment.getId(), treatment);
-                return treatment;
-            }
-
-            @Override
-            public Optional<Treatment> findById(String id) {
-                return Optional.ofNullable(dados.get(id));
-            }
-
-            @Override
-            public List<Treatment> findByUserId(String userId) {
-
-                List<Treatment> resultado = new ArrayList<>();
-
-                for (Treatment treatment : dados.values()) {
-                    if (userId.equals(treatment.getUserId())) {
-                        resultado.add(treatment);
-                    }
-                }
-
-                return resultado;
-            }
-
-            @Override
-            public Treatment update(Treatment treatment) {
-                if (!dados.containsKey(treatment.getId())) {
-                    throw new NoSuchElementException();
-                }
-
-                dados.put(treatment.getId(), treatment);
-                return treatment;
-            }
-        };
+        connection = new MongoConnection(mongoUri, databaseName);
+        repository = new MongoTreatmentRepository(connection.getDatabase());
 
         // Clock.fixed simula um horário conhecido.
         // Assim, o closedAt pode ser testado de forma previsível.
@@ -96,6 +74,37 @@ public class TreatmentHttpTest {
         router.register("PUT", "/treatments/{id}", handler);
         router.register("POST", "/treatments/{id}/activate", handler);
         router.register("POST", "/treatments/{id}/close", handler);
+    }
+
+    @AfterEach
+    void limpar() {
+        if (connection != null) {
+            try {
+                // Remove apenas o banco temporário utilizado pelo teste
+                if (connection.getDatabase() != null
+                        && connection.getDatabase().getName().startsWith("dosecerta_test_")) {
+                    connection.getDatabase().drop();
+                }
+            } finally {
+                connection.close();
+            }
+        }
+    }
+
+    private String resolveMongoUri() {
+        String uri = System.getenv("MONGODB_URI");
+        if (uri == null || uri.isBlank()) {
+            uri = System.getProperty("MONGODB_URI");
+        }
+        if ((uri == null || uri.isBlank())
+                && "true".equalsIgnoreCase(System.getProperty("mongo.integration"))) {
+            uri = "mongodb://127.0.0.1:27017";
+        }
+        return uri;
+    }
+
+    private MongoCollection<Document> treatmentsCollection() {
+        return connection.getCollection(MongoTreatmentRepository.DEFAULT_COLLECTION);
     }
 
     // Simula uma requisição HTTP passando pelo Router.
@@ -135,7 +144,7 @@ public class TreatmentHttpTest {
         return Document.parse(response.getBody()).getString("id");
     }
 
-    // Simula a inclusão feita pela outra sub-issue.
+    // Simula a inclusão feita pela outra sub-issue, persistindo diretamente no MongoDB.
     // Aqui não estamos testando o endpoint de medicamentos.
     private void adicionarMedicamento(String id) {
 
@@ -149,11 +158,13 @@ public class TreatmentHttpTest {
                 "med-1", "Medicamento A", "1 comprimido", cronograma
         );
 
-        dados.get(id).addMedication(medicamento);
+        Treatment treatment = repository.findById(id).orElseThrow();
+        treatment.addMedication(medicamento);
+        repository.update(treatment);
     }
 
     @Test
-    void deveCriarRascunhoIncompleto() {
+    void deveCriarRascunhoIncompletoEPersistirNoMongoDB() {
 
         HttpResponse response = requisitar(
                 "POST", "/treatments", "{}"
@@ -162,10 +173,17 @@ public class TreatmentHttpTest {
         assertEquals(201, response.getStatusCode());
 
         Document json = Document.parse(response.getBody());
+        String id = json.getString("id");
 
         assertEquals("DRAFT", json.getString("status"));
         assertEquals("usuario-A", json.getString("userId"));
-        assertNotNull(json.getString("id"));
+        assertNotNull(id);
+
+        // Confirma que o documento foi gravado fisicamente na collection treatments do MongoDB
+        Document persistedDoc = treatmentsCollection().find(Filters.eq("_id", id)).first();
+        assertNotNull(persistedDoc, "Rascunho criado via HTTP deve existir no MongoDB");
+        assertEquals("DRAFT", persistedDoc.getString("status"));
+        assertEquals("usuario-A", persistedDoc.getString("userId"));
     }
 
     @Test
@@ -185,6 +203,7 @@ public class TreatmentHttpTest {
         assertEquals(200, response.getStatusCode());
         assertTrue(response.getBody().contains(idA));
         assertFalse(response.getBody().contains(idB));
+        assertEquals(2L, treatmentsCollection().countDocuments());
     }
 
     @Test
@@ -205,7 +224,7 @@ public class TreatmentHttpTest {
     }
 
     @Test
-    void deveAtualizarMetadadosDoRascunho() {
+    void deveAtualizarMetadadosDoRascunhoNoMongoDB() {
 
         String id = criarRascunho();
 
@@ -226,6 +245,14 @@ public class TreatmentHttpTest {
 
         assertEquals("Novo nome", json.getString("name"));
         assertEquals("2026-11-20", json.getString("startDate"));
+
+        // Confirma que as alterações foram persistidas na collection treatments
+        Document persistedDoc = treatmentsCollection().find(Filters.eq("_id", id)).first();
+        assertNotNull(persistedDoc);
+        assertEquals("Novo nome", persistedDoc.getString("name"));
+        assertEquals("Observações atualizadas", persistedDoc.getString("description"));
+        assertEquals("2026-11-20", persistedDoc.getString("startDate"));
+        assertNull(persistedDoc.get("endDate"));
     }
 
     @Test
@@ -250,6 +277,9 @@ public class TreatmentHttpTest {
         assertEquals(400, requisitar(
                 "POST", "/treatments", titularForjado
         ).getStatusCode());
+
+        // Nenhuma requisição inválida deve persistir documentos no banco
+        assertEquals(0L, treatmentsCollection().countDocuments());
     }
 
     @Test
@@ -295,11 +325,12 @@ public class TreatmentHttpTest {
         );
 
         assertEquals(400, response.getStatusCode());
-        assertEquals(TreatmentStatus.DRAFT, dados.get(id).getStatus());
+        assertEquals(TreatmentStatus.DRAFT, repository.findById(id).orElseThrow().getStatus());
+        assertEquals("DRAFT", treatmentsCollection().find(Filters.eq("_id", id)).first().getString("status"));
     }
 
     @Test
-    void deveAtivarEEncerrarTratamentoValido() {
+    void deveAtivarEEncerrarTratamentoValidoNoMongoDB() {
 
         String id = criarRascunho();
         adicionarMedicamento(id);
@@ -311,6 +342,8 @@ public class TreatmentHttpTest {
         assertEquals(200, ativacao.getStatusCode());
         assertEquals("ACTIVE",
                 Document.parse(ativacao.getBody()).getString("status"));
+        assertEquals("ACTIVE",
+                treatmentsCollection().find(Filters.eq("_id", id)).first().getString("status"));
 
         HttpResponse encerramento = requisitar(
                 "POST", "/treatments/" + id + "/close", null
@@ -324,8 +357,47 @@ public class TreatmentHttpTest {
         assertEquals("2026-11-19T15:00:00Z",
                 json.getString("closedAt"));
 
-        // O encerramento não pode apagar o medicamento.
-        assertEquals(1, dados.get(id).getMedications().size());
+        // Confirma no MongoDB o estado encerrado, o timestamp closedAt e a preservação do medicamento
+        Document closedDoc = treatmentsCollection().find(Filters.eq("_id", id)).first();
+        assertNotNull(closedDoc);
+        assertEquals("CLOSED", closedDoc.getString("status"));
+        assertEquals(Date.from(Instant.parse("2026-11-19T15:00:00Z")), closedDoc.getDate("closedAt"));
+        assertEquals(1, repository.findById(id).orElseThrow().getMedications().size());
+    }
+
+    @Test
+    void deveConfirmarConexaoEPersistenciaRealEntreInstanciasNoMongoDB() {
+
+        String id = criarRascunho();
+        adicionarMedicamento(id);
+
+        assertEquals(200, requisitar(
+                "POST", "/treatments/" + id + "/activate", null
+        ).getStatusCode());
+
+        // Abre uma nova conexão MongoDB e um novo Router/Handler para provar que os dados vêm do banco
+        try (MongoConnection novaConexao = new MongoConnection(mongoUri, databaseName)) {
+            Document ping = novaConexao.getDatabase().runCommand(new Document("ping", 1));
+            assertEquals(1.0, ((Number) ping.get("ok")).doubleValue(), 0.001);
+
+            TreatmentRepository novoRepository = new MongoTreatmentRepository(novaConexao.getDatabase());
+            TreatmentService novoService = new TreatmentService(novoRepository);
+            TreatmentHandler novoHandler = new TreatmentHandler(novoService);
+
+            Router novoRouter = new Router(request -> Optional.of("usuario-A"));
+            novoRouter.register("GET", "/treatments/{id}", novoHandler);
+
+            HttpResponse consulta = novoRouter.route(
+                    new HttpRequest("GET", "/treatments/" + id, "HTTP/1.1", Collections.emptyMap(), "")
+            );
+
+            assertEquals(200, consulta.getStatusCode());
+            Document body = Document.parse(consulta.getBody());
+            assertEquals(id, body.getString("id"));
+            assertEquals("ACTIVE", body.getString("status"));
+            assertEquals("Tratamento A", body.getString("name"));
+            assertEquals(1, body.getList("medications", Document.class).size());
+        }
     }
 
     @Test
