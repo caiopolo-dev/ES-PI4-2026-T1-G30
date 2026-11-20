@@ -18,6 +18,9 @@ public class MedicamentoEmUso {
     private String name;
     private String dose;
     private Integer quantity;
+    private String unit;
+    private boolean active = true;
+    private long revision;
     private String observations;
     private final List<CronogramaDose> schedules;
 
@@ -36,8 +39,8 @@ public class MedicamentoEmUso {
         if (dose.trim().isEmpty()) {
             throw new IllegalArgumentException("dose do medicamento não pode ser vazia");
         }
-        if (quantity != null && quantity < 0) {
-            throw new IllegalArgumentException("quantity não pode ser negativa");
+        if (quantity != null && quantity <= 0) {
+            throw new IllegalArgumentException("quantity deve ser positiva");
         }
 
         this.id = (id == null || id.trim().isEmpty())
@@ -56,6 +59,29 @@ public class MedicamentoEmUso {
                 }
             }
         }
+    }
+
+    // Mantem os construtores existentes e acrescenta os novos campos.
+    public MedicamentoEmUso(String id, String name, String dose, Integer quantity,
+            String unit, String observations, boolean active, List<CronogramaDose> schedules) {
+        this(id, name, dose, quantity, observations, schedules);
+        setUnit(unit);
+        this.active = active;
+    }
+
+    public MedicamentoEmUso(String id, String name, String dose, Integer quantity,
+            String unit, String observations, boolean active, List<CronogramaDose> schedules, long revision) {
+        this(id, name, dose, quantity, unit, observations, active, schedules);
+        if (revision < 0) { throw new IllegalArgumentException("Revisao invalida."); }
+        this.revision = revision;
+    }
+
+    public long getRevision() {
+        return revision;
+    }
+
+    public MedicamentoEmUso withRevision(long nextRevision) {
+        return new MedicamentoEmUso(id, name, dose, quantity, unit, observations, active, schedules, nextRevision);
     }
 
     public MedicamentoEmUso(
@@ -125,10 +151,35 @@ public class MedicamentoEmUso {
     }
 
     public void setQuantity(Integer quantity) {
-        if (quantity != null && quantity < 0) {
-            throw new IllegalArgumentException("quantity não pode ser negativa");
+        if (quantity != null && quantity <= 0) {
+            throw new IllegalArgumentException("quantity deve ser positiva");
         }
         this.quantity = quantity;
+    }
+
+    public String getUnit() {
+        return unit;
+    }
+
+    public void setUnit(String unit) {
+        this.unit = unit == null || unit.isBlank() ? null : unit.trim();
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    // Preserva o ID e todas as versoes de cronograma.
+    public void deactivate() {
+        this.active = false;
+    }
+
+    // Valida os dados do medicamento; o cronograma e validado no fluxo proprio.
+    public void validateForActivation() {
+        if (name == null || name.isBlank() || dose == null || dose.isBlank()
+                || quantity == null || quantity <= 0 || unit == null) {
+            throw new IllegalStateException("Medicamento incompleto para ativacao.");
+        }
     }
 
     public String getObservations() {
@@ -266,13 +317,16 @@ public class MedicamentoEmUso {
                 && Objects.equals(name, that.name)
                 && Objects.equals(dose, that.dose)
                 && Objects.equals(quantity, that.quantity)
+                && Objects.equals(unit, that.unit)
+                && active == that.active
+                && revision == that.revision
                 && Objects.equals(observations, that.observations)
                 && Objects.equals(schedules, that.schedules);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, dose, quantity, observations, schedules);
+        return Objects.hash(id, name, dose, quantity, unit, active, revision, observations, schedules);
     }
 
     @Override
@@ -282,6 +336,8 @@ public class MedicamentoEmUso {
                 + ", name='" + name + '\''
                 + ", dose='" + dose + '\''
                 + ", quantity=" + quantity
+                + ", unit='" + unit + '\''
+                + ", active=" + active
                 + ", observations='" + observations + '\''
                 + ", schedules=" + schedules
                 + '}';

@@ -27,7 +27,7 @@ public class Router {
 
     // Mapa que relaciona: path -> (method -> HttpHandler)
     // Ex: "/health" -> { "GET" -> HealthHandler }
-    private final Map<String, Map<String, HttpHandler>> routes = new HashMap<>();
+    private final Map<String, Map<String, HttpHandler>> routes = new java.util.LinkedHashMap<>();
 
     /**
      * Registra centralizadamente uma rota relacionando método HTTP + path a um handler.
@@ -53,20 +53,20 @@ public class Router {
         // Map.Entry<String, HtttpHandler>: representa uma entrada do mapa, com chave String e valor HttpHandler.
 
 
-        // Se não encontrar, procura uma rota com parâmetros, como /treatments/{id}
+        // Se não houver correspondência exata,
+        // procura uma rota dinâmica como /treatments/{id}.
         if (handlersByMethod == null) {
-            for (Map.Entry<String, Map<String, HttpHandler>> entry : routes.entrySet()) {
-
-                if (caminhoCorrespondente(entry.getKey(), path)) {
-                    handlersByMethod = entry.getValue();
+            for (var route : routes.entrySet()) {
+                if (matches(route.getKey(), path)) {
+                    handlersByMethod = route.getValue();
                     break;
                 }
             }
-            // Nenhuma rota registrada corresponde ao caminho solicitado.
-            // Retorna 404 antes de tentar acessar um Map inexistente.
-            if (handlersByMethod == null) {
-                return HttpResponse.notFound("Route not found: " + path);
-            }
+        }
+
+        // Nenhuma rota encontrada: HTTP 404.
+        if (handlersByMethod == null) {
+            return HttpResponse.notFound("Route not found: " + path);
         }
 
         // 2. Verifica se o método HTTP é permitido para essa rota
@@ -91,6 +91,20 @@ public class Router {
             }
         }
         return execute(handler, request);
+    }
+
+    // Permite IDs no caminho e preserva a prioridade das rotas exatas.
+    private boolean matches(String template, String path) {
+        if (!template.contains("{")) { return false; }
+        String[] expected = template.split("/", -1);
+        String[] actual = path.split("/", -1);
+        if (expected.length != actual.length) { return false; }
+        for (int index = 0; index < expected.length; index++) {
+            if (expected[index].startsWith("{") && expected[index].endsWith("}")) {
+                if (actual[index].isEmpty()) { return false; }
+            } else if (!expected[index].equals(actual[index])) { return false; }
+        }
+        return true;
     }
 
     private HttpResponse execute(HttpHandler handler, HttpRequest request) {

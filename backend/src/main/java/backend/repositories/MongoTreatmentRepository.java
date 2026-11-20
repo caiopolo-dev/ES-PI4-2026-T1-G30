@@ -228,8 +228,11 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         incomingMed.getName(),
                         incomingMed.getDose(),
                         incomingMed.getQuantity(),
+                        incomingMed.getUnit(),
                         incomingMed.getObservations(),
-                        mergedSchedules
+                        incomingMed.isActive(),
+                        mergedSchedules,
+                        incomingMed.getRevision()
                 ));
             }
         }
@@ -356,8 +359,12 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         : null);
 
         List<Document> medicationDocs = new ArrayList<>();
+
         for (MedicamentoEmUso med : treatment.getMedications()) {
+
             List<Document> scheduleDocs = new ArrayList<>();
+
+            // Serializa todas as versões dos cronogramas.
             for (CronogramaDose schedule : med.getSchedules()) {
                 Document schedDoc = new Document()
                         .append("version", schedule.getVersion())
@@ -369,16 +376,22 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         .append("endDate", schedule.getEndDate())
                         .append("timezone", schedule.getTimezone())
                         .append("active", schedule.isActive());
+
                 scheduleDocs.add(schedDoc);
             }
 
+            // Preserva os campos das duas branches.
             Document medDoc = new Document()
                     .append("id", med.getId())
                     .append("name", med.getName())
                     .append("dose", med.getDose())
                     .append("quantity", med.getQuantity())
+                    .append("unit", med.getUnit())
+                    .append("active", med.isActive())
+                    .append("revision", med.getRevision())
                     .append("observations", med.getObservations())
                     .append("schedules", scheduleDocs);
+
             medicationDocs.add(medDoc);
         }
 
@@ -453,8 +466,11 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         medName,
                         dose,
                         quantity,
+                        (String) medDoc.get("unit"),
                         observations,
-                        schedules
+                        !Boolean.FALSE.equals(medDoc.get("active")),
+                        schedules,
+                        medDoc.get("revision") instanceof Number ? ((Number) medDoc.get("revision")).longValue() : 0L
                 ));
             }
         }
