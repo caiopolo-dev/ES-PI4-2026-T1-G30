@@ -63,6 +63,10 @@ public class Main {
             TreatmentHandler treatmentHandler =
                     new TreatmentHandler(treatmentService);
 
+            // issue 28 - Compartilha o mesmo repositório MongoDB com o serviço de cronogramas.
+            ScheduleService scheduleService = new ScheduleService(treatmentRepository);
+            ScheduleHandler scheduleHandler = new ScheduleHandler(scheduleService);
+
             AuthService authService = new AuthService(userRepository);
             AuthHandler authHandler = new AuthHandler(authService);
 
@@ -102,6 +106,9 @@ public class Main {
             router.register("PUT", "/treatments/{id}", treatmentHandler);
             router.register("POST", "/treatments/{id}/activate", treatmentHandler);
             router.register("POST", "/treatments/{id}/close", treatmentHandler);
+
+            // issue 28 - Registra configuração e consulta do cronograma do medicamento.
+            scheduleHandler.registerRoutes(router);
 
 
             // Inicialização do servidor

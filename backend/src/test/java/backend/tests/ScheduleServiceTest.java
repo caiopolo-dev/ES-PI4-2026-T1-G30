@@ -5,6 +5,7 @@ import backend.auth.AuthContext;
 import backend.auth.ResourceNotFoundException;
 import backend.models.CronogramaDose;
 import backend.models.MedicamentoEmUso;
+import backend.models.ScheduleFrequency;
 import backend.models.Treatment;
 import backend.models.TreatmentStatus;
 import backend.repositories.TreatmentRepository;
@@ -135,7 +136,7 @@ class ScheduleServiceTest {
         CronogramaDose resultado = servico.prepararNovaVersao(
                 usuario, "tratamento-1", "med-1",
                 criarCronograma("08:00"),
-                Instant.parse("2026-11-20T12:00:00Z")
+                inicioAnterior
         );
 
         assertEquals(1, resultado.getVersion());
@@ -206,6 +207,22 @@ class ScheduleServiceTest {
         } catch (IllegalArgumentException esperado) {
             assertTrue(esperado.getMessage().contains("após o tratamento"));
         }
+    }
+
+    @Test
+    void deveRejeitarInicioEfetivoAposTratamentoSemFimNoCronograma() {
+        ScheduleService servico = criarServico(
+                criarTratamento(TreatmentStatus.DRAFT, true, List.of()));
+        CronogramaDose configuracao = new CronogramaDose(
+                1, ScheduleFrequency.EVERY_DAY, null, List.of("08:00"),
+                "2026-11-01", null, "America/Sao_Paulo", true);
+
+        IllegalArgumentException erro = assertThrows(IllegalArgumentException.class,
+                () -> servico.prepararNovaVersao(
+                        usuario, "tratamento-1", "med-1", configuracao,
+                        Instant.parse("2027-01-01T03:00:00Z")));
+
+        assertTrue(erro.getMessage().contains("término do tratamento"));
     }
 
     @Test
@@ -340,13 +357,61 @@ class ScheduleServiceTest {
                 "tratamento-1",
                 "med-1",
                 criarCronograma("08:00"),
-                Instant.parse("2026-11-20T12:00:00Z")
+                inicioAnterior
         );
 
         assertEquals(1, resultado.size());
         assertEquals(1, resultado.get(0).getVersion());
         assertEquals(inicioAnterior, resultado.get(0).getValidFrom());
         assertNull(resultado.get(0).getValidTo());
+    }
+
+    @Test
+    void deveVersionarQuandoSomenteADataEfetivaMuda() {
+        Instant inicioAnterior = Instant.parse("2026-11-10T12:00:00Z");
+        Instant inicioNovo = Instant.parse("2026-11-20T12:00:00Z");
+
+        CronogramaDose anterior = criarCronograma("08:00")
+                .withValidity(inicioAnterior, null);
+        ScheduleService servico = criarServico(
+                criarTratamento(TreatmentStatus.DRAFT, true, List.of(anterior)));
+
+        List<CronogramaDose> resultado = servico.prepararTransicao(
+                usuario, "tratamento-1", "med-1",
+                criarCronograma("08:00"), inicioNovo);
+
+        assertEquals(2, resultado.size());
+        assertEquals(inicioNovo, resultado.get(0).getValidTo());
+        assertEquals(2, resultado.get(1).getVersion());
+        assertEquals(inicioNovo, resultado.get(1).getValidFrom());
+    }
+
+    @Test
+    void deveRejeitarHistoricoComVigenciaSobreposta() {
+        Instant inicioPrimeiro = Instant.parse("2026-11-01T12:00:00Z");
+        Instant inicioSegundo = Instant.parse("2026-11-05T12:00:00Z");
+        Instant inicioAtual = Instant.parse("2026-11-10T12:00:00Z");
+        Instant inicioNovo = Instant.parse("2026-11-20T12:00:00Z");
+        CronogramaDose primeiro = criarCronograma("07:00")
+                .withValidity(inicioPrimeiro, inicioAtual)
+                .deactivate();
+        CronogramaDose segundoSobreposto = criarCronograma("07:30")
+                .withVersion(2)
+                .withValidity(inicioSegundo, Instant.parse("2026-11-08T12:00:00Z"))
+                .deactivate();
+        CronogramaDose atual = criarCronograma("08:00")
+                .withVersion(3)
+                .withValidity(inicioAtual, null);
+        ScheduleService servico = criarServico(
+                criarTratamento(TreatmentStatus.DRAFT, true,
+                        List.of(primeiro, segundoSobreposto, atual)));
+
+        IllegalStateException erro = assertThrows(IllegalStateException.class,
+                () -> servico.prepararTransicao(
+                        usuario, "tratamento-1", "med-1",
+                        criarCronograma("09:00"), inicioNovo));
+
+        assertTrue(erro.getMessage().contains("sobreposta"));
     }
 
     @Test

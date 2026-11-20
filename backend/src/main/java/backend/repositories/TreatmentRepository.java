@@ -1,5 +1,6 @@
 package backend.repositories;
 
+import backend.models.CronogramaDose;
 import backend.models.Treatment;
 import java.util.List;
 import java.util.Optional;
@@ -39,6 +40,16 @@ public interface TreatmentRepository {
             return Optional.empty();
         }
         return findById(id).filter(treatment -> userId.equals(treatment.getUserId()));
+    }
+
+    // issue 28 - Atualiza atomicamente o histórico do cronograma usando a revisão do medicamento.
+    default boolean updateMedicationSchedules(
+            String treatmentId,
+            String userId,
+            String medicationId,
+            long expectedRevision,
+            List<CronogramaDose> schedules) {
+        throw new UnsupportedOperationException("Atualização de cronogramas não suportada");
     }
 }
 

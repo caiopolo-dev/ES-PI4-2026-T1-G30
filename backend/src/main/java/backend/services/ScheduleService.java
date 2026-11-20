@@ -11,22 +11,25 @@ import backend.repositories.TreatmentRepository;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.ArrayList;
 
 // issue 28
-// Responsável por consultar cronogramas e preparar novas versões.
-// A gravação no MongoDB será integrada em uma próxima etapa.
+// Responsável por consultar, versionar e persistir cronogramas.
 public class ScheduleService {
 
     private final TreatmentAccessService accessService;
+    // issue 28 - Mantém a gravação condicional no mesmo repositório do tratamento.
+    private final TreatmentRepository repository;
 
     // issue 28
     // Reutiliza o controle de acesso existente para verificar o titular.
     public ScheduleService(TreatmentRepository repository) {
         Objects.requireNonNull(repository, "repository não pode ser null");
+        this.repository = repository;
         this.accessService = new TreatmentAccessService(repository);
     }
 
@@ -41,15 +44,54 @@ public class ScheduleService {
         return medicamento.getSchedules();
     }
 
+    // issue 28 - Expõe o medicamento validado para informar a revisão no contrato HTTP.
+    public MedicamentoEmUso consultarMedicamento(
+            AuthContext context, String treatmentId, String medicationId) {
+        return accessService.findMedication(context, treatmentId, medicationId);
+    }
+
     // issue 28
     // Consulta a versão atualmente ativa do cronograma.
     public Optional<CronogramaDose> consultarAtual(AuthContext context,String treatmentId,String medicationId) {
 
+        return consultarNoInstante(context, treatmentId, medicationId, Instant.now());
+    }
+
+    // issue 28 - Localiza a versão pela vigência [validFrom, validTo), não apenas por active.
+    public Optional<CronogramaDose> consultarNoInstante(
+            AuthContext context,
+            String treatmentId,
+            String medicationId,
+            Instant instante) {
+
+        Objects.requireNonNull(instante, "instante não pode ser null");
+
         // Busca o medicamento verificando o usuário autenticado.
         MedicamentoEmUso medicamento = accessService.findMedication(context, treatmentId, medicationId);
 
-        // Optional representa um resultado que pode não existir.
-        return medicamento.getActiveSchedule();
+        CronogramaDose encontrado = null;
+        for (CronogramaDose cronograma : medicamento.getSchedules()) {
+            if (cronograma.coversInstant(instante)) {
+                if (encontrado != null) {
+                    throw new IllegalStateException("Cronogramas possuem vigências sobrepostas");
+                }
+                encontrado = cronograma;
+            }
+        }
+
+        if (encontrado != null) {
+            return Optional.of(encontrado);
+        }
+
+        // Compatibilidade de leitura: versões legadas não possuem vigência conhecida.
+        Optional<CronogramaDose> legado = medicamento.getActiveSchedule();
+        if (legado.isPresent()
+                && legado.get().getValidFrom() == null
+                && legado.get().getValidTo() == null) {
+            return legado;
+        }
+
+        return Optional.empty();
     }
 
     // issue 28
@@ -84,16 +126,8 @@ public class ScheduleService {
             throw new IllegalStateException("Medicamento inativo não pode alterar cronogramas");
         }
 
-        // Verifica se o início planejado está dentro do tratamento.
-        LocalDate inicio = LocalDate.parse(configuracao.getStartDate());
-
-        if (tratamento.getStartDate() != null && inicio.isBefore(tratamento.getStartDate())) {
-            throw new IllegalArgumentException("Cronograma não pode começar antes do tratamento");
-        }
-
-        if (tratamento.getEndDate() != null && inicio.isAfter(tratamento.getEndDate())) {
-            throw new IllegalArgumentException("Cronograma não pode começar após o tratamento");
-        }
+        // issue 28 - Confere datas planejadas e o instante efetivo contra a vigência do tratamento.
+        validarVigenciaPlanejada(tratamento, configuracao, inicioVigencia);
 
         // Percorre o histórico para identificar a última versão.
         int maiorVersao = 0;
@@ -118,8 +152,11 @@ public class ScheduleService {
             throw new IllegalStateException("Medicamento possui mais de um cronograma ativo");
         }
 
-        // Evita criar outra versão quando a configuração é igual.
-        if (cronogramaAtual != null && cronogramaAtual.hasSameConfiguration(configuracao)) {
+        // issue 28 - Só considera repetição quando configuração e vigência são exatamente iguais.
+        if (cronogramaAtual != null
+                && cronogramaAtual.hasSameConfiguration(configuracao)
+                && Objects.equals(cronogramaAtual.getValidFrom(), inicioVigencia)
+                && cronogramaAtual.getValidTo() == null) {
 
             return cronogramaAtual;
         }
@@ -137,6 +174,76 @@ public class ScheduleService {
         // Prepara uma nova versão ativa com início de vigência.
         // O término fica indefinido até a substituição ou encerramento.
         return configuracao.withVersion(maiorVersao + 1).withActive(true).withValidity(inicioVigencia, null);
+    }
+
+    // issue 28 - Persiste a transição com revisão otimista e trata retransmissões idênticas.
+    public MedicamentoEmUso salvar(
+            AuthContext context,
+            String treatmentId,
+            String medicationId,
+            CronogramaDose configuracao,
+            Instant inicioVigencia,
+            long expectedRevision) {
+
+        if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) {
+            throw new IllegalArgumentException("Revisão inválida");
+        }
+
+        Treatment tratamento = accessService.find(context, treatmentId);
+        if (tratamento.getStatus() == TreatmentStatus.CLOSED) {
+            throw new IllegalStateException("Tratamento encerrado não pode alterar cronogramas");
+        }
+        MedicamentoEmUso atual = tratamento.findMedicationById(medicationId)
+                .orElseThrow(ResourceNotFoundException::new);
+        if (!atual.isActive()) {
+            throw new IllegalStateException("Medicamento inativo não pode alterar cronogramas");
+        }
+        // issue 28 - A idempotência só pode aceitar um histórico previamente consistente.
+        validarIntegridadeHistorico(atual.getSchedules());
+        Optional<CronogramaDose> cronogramaAtual = atual.getActiveSchedule();
+
+        if (cronogramaAtual.isPresent()
+                && cronogramaAtual.get().hasSameConfiguration(configuracao)
+                && Objects.equals(cronogramaAtual.get().getValidFrom(), inicioVigencia)
+                && cronogramaAtual.get().getValidTo() == null) {
+            return atual;
+        }
+
+        if (atual.getRevision() != expectedRevision) {
+            throw new MedicationOperationConflictException(
+                    "Cronograma alterado. Consulte os dados novamente.");
+        }
+
+        List<CronogramaDose> atualizado = prepararTransicao(
+                context, treatmentId, medicationId, configuracao, inicioVigencia);
+
+        boolean gravado = repository.updateMedicationSchedules(
+                treatmentId,
+                context.userId(),
+                medicationId,
+                expectedRevision,
+                atualizado
+        );
+
+        if (!gravado) {
+            MedicamentoEmUso concorrente = accessService.findMedication(
+                    context, treatmentId, medicationId);
+            // issue 28 - Não converte um histórico concorrente inconsistente em sucesso idempotente.
+            validarIntegridadeHistorico(concorrente.getSchedules());
+            Optional<CronogramaDose> concorrenteAtual = concorrente.getActiveSchedule();
+
+            if (concorrenteAtual.isPresent()
+                    && concorrenteAtual.get().hasSameConfiguration(configuracao)
+                    && Objects.equals(concorrenteAtual.get().getValidFrom(), inicioVigencia)
+                    && concorrenteAtual.get().getValidTo() == null) {
+                return concorrente;
+            }
+
+            throw new MedicationOperationConflictException(
+                    "Cronograma alterado durante a gravação.");
+        }
+
+        return accessService.findMedication(context, treatmentId, medicationId);
     }
 
 
@@ -165,6 +272,9 @@ public class ScheduleService {
         );
 
         List<CronogramaDose> historico = medicamento.getSchedules();
+
+        // issue 28 - Valida todos os intervalos existentes antes de preparar qualquer alteração.
+        validarIntegridadeHistorico(historico);
 
         // Se a configuração já existe como versão atual,
         // devolve o histórico sem criar uma versão duplicada.
@@ -231,6 +341,81 @@ public class ScheduleService {
 
         // Retorna uma lista imutável para impedir alterações externas.
         return List.copyOf(atualizado);
+    }
+
+    // issue 28 - Garante que quaisquer duas versões respeitem intervalos [validFrom, validTo).
+    private void validarIntegridadeHistorico(List<CronogramaDose> historico) {
+        int quantidadeAtivas = 0;
+        for (int i = 0; i < historico.size(); i++) {
+            CronogramaDose primeiro = historico.get(i);
+            if (primeiro.getValidFrom() == null) {
+                throw new IllegalStateException("Histórico possui versão sem início de vigência");
+            }
+            if (primeiro.isActive()) {
+                quantidadeAtivas++;
+                if (primeiro.getValidTo() != null) {
+                    throw new IllegalStateException("Versão ativa possui término de vigência");
+                }
+            } else if (primeiro.getValidTo() == null) {
+                throw new IllegalStateException("Versão histórica possui vigência aberta");
+            }
+
+            for (int j = i + 1; j < historico.size(); j++) {
+                CronogramaDose segundo = historico.get(j);
+                if (segundo.getValidFrom() == null) {
+                    throw new IllegalStateException("Histórico possui versão sem início de vigência");
+                }
+
+                boolean primeiroAntesDoFimDoSegundo = segundo.getValidTo() == null
+                        || primeiro.getValidFrom().isBefore(segundo.getValidTo());
+                boolean segundoAntesDoFimDoPrimeiro = primeiro.getValidTo() == null
+                        || segundo.getValidFrom().isBefore(primeiro.getValidTo());
+                if (primeiroAntesDoFimDoSegundo && segundoAntesDoFimDoPrimeiro) {
+                    throw new IllegalStateException("Histórico possui vigências sobrepostas");
+                }
+            }
+        }
+        if (quantidadeAtivas > 1) {
+            throw new IllegalStateException("Medicamento possui mais de um cronograma ativo");
+        }
+    }
+
+    // issue 28 - Mantém cronograma e início efetivo dentro do período planejado.
+    private void validarVigenciaPlanejada(
+            Treatment tratamento,
+            CronogramaDose configuracao,
+            Instant inicioVigencia) {
+
+        LocalDate inicio = LocalDate.parse(configuracao.getStartDate());
+        LocalDate fim = configuracao.getEndDate() == null
+                ? null
+                : LocalDate.parse(configuracao.getEndDate());
+
+        if (tratamento.getStartDate() != null && inicio.isBefore(tratamento.getStartDate())) {
+            throw new IllegalArgumentException("Cronograma não pode começar antes do tratamento");
+        }
+        if (tratamento.getEndDate() != null && inicio.isAfter(tratamento.getEndDate())) {
+            throw new IllegalArgumentException("Cronograma não pode começar após o tratamento");
+        }
+        if (fim != null && tratamento.getStartDate() != null
+                && fim.isBefore(tratamento.getStartDate())) {
+            throw new IllegalArgumentException("Cronograma termina antes do tratamento");
+        }
+        if (fim != null && tratamento.getEndDate() != null
+                && fim.isAfter(tratamento.getEndDate())) {
+            throw new IllegalArgumentException("Cronograma termina após o tratamento");
+        }
+
+        LocalDate inicioEfetivo = inicioVigencia
+                .atZone(ZoneId.of(configuracao.getTimezone()))
+                .toLocalDate();
+        if (tratamento.getEndDate() != null
+                && inicioEfetivo.isAfter(tratamento.getEndDate())) {
+            throw new IllegalArgumentException("Início da vigência após o término do tratamento");
+        }
+        if (inicioEfetivo.isBefore(inicio) || (fim != null && inicioEfetivo.isAfter(fim))) {
+            throw new IllegalArgumentException("Início da vigência fora do período do cronograma");
+        }
     }
 
 
