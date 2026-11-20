@@ -1,3 +1,4 @@
+//Autores: Caio Ferreira Polo, Cauã Bianchi Ferroni, Miguel Batista Gallinucci, Samuel Campovilla
 package backend;
 
 import backend.auth.SessionAuthenticator;

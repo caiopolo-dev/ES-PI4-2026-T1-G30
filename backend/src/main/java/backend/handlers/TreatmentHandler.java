@@ -1,4 +1,4 @@
-
+//Autor: Samuel Campovilla
 package backend.handlers;
 
 import backend.auth.AuthContext;
