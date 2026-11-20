@@ -234,14 +234,63 @@ class MedicationInUseIntegrationTest {
 
     @Test
     void existingTreatmentMappingKeepsUnitAndInactiveState() {
-        var repository = new MongoTreatmentRepository();
-        var medication = medication("m", 1);
-        medication.deactivate();
-        var treatment = new Treatment("t", "a", "Demo", List.of(medication));
-        repository.save(treatment);
-        assertEquals(medication, repository.findById("t").orElseThrow().getMedications().get(0));
-        repository.update(treatment);
-        assertEquals(medication, repository.findById("t").orElseThrow().getMedications().get(0));
+
+        String uri = System.getenv("MONGODB_URI");
+
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                uri != null && !uri.isBlank(),
+                "MONGODB_URI não configurada"
+        );
+
+        // Banco temporário com nome compatível com o Atlas.
+        String databaseName = "dosecerta_test_med_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+
+        try (var connection = new MongoConnection(uri, databaseName)) {
+            try {
+                var repository =
+                        new MongoTreatmentRepository(connection.getDatabase());
+
+                var medication = medication("m", 1);
+                medication.deactivate();
+
+                var treatment = new Treatment(
+                        "t",
+                        "a",
+                        "Demo",
+                        null,
+                        null,
+                        null,
+                        backend.models.TreatmentStatus.DRAFT,
+                        null,
+                        List.of(medication)
+                );
+
+                repository.save(treatment);
+
+                assertEquals(
+                        medication,
+                        repository.findById("t")
+                                .orElseThrow()
+                                .getMedications()
+                                .get(0)
+                );
+
+                repository.update(treatment);
+
+                assertEquals(
+                        medication,
+                        repository.findById("t")
+                                .orElseThrow()
+                                .getMedications()
+                                .get(0)
+                );
+
+            } finally {
+                // Exclui somente o banco temporário.
+                connection.getDatabase().drop();
+            }
+        }
     }
 
     @Test

@@ -34,7 +34,9 @@ class DoseRecordOwnershipTest {
         mongoClient = MongoClients.create(uri);
 
         String nomeBanco = "dosecerta_test_"
-                + UUID.randomUUID().toString().replace("-", "");
+                + UUID.randomUUID().toString()
+                        .replace("-", "")
+                        .substring(0, 16);
 
         testDatabase = mongoClient.getDatabase(nomeBanco);
     }

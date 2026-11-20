@@ -79,7 +79,9 @@ public class AgendaDiariaTest {
 
         // Banco exclusivo para cada teste, evitando misturar os dados.
         String nomeBanco = "dosecerta_test_"
-                + UUID.randomUUID().toString().replace("-", "");
+                + UUID.randomUUID().toString()
+                        .replace("-", "")
+                        .substring(0, 16);
 
         testDatabase = mongoClient.getDatabase(nomeBanco);
 

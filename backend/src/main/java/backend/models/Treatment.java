@@ -474,8 +474,11 @@ public class Treatment {
                 medication.getName(),
                 medication.getDose(),
                 medication.getQuantity(),
+                medication.getUnit(),
                 medication.getObservations(),
-                medication.getSchedules()
+                medication.isActive(),
+                medication.getSchedules(),
+                medication.getRevision()
         );
     }
 
