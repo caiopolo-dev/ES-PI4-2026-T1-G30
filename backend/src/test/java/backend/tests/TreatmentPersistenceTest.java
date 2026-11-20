@@ -49,8 +49,8 @@ public class TreatmentPersistenceTest {
         assumeTrue(mongoUri != null && !mongoUri.isBlank(),
                 "MONGODB_URI não configurada para testes de integração com MongoDB");
 
-        // Cria um banco temporário e isolado para cada teste
-        databaseName = "dosecerta_test_treatments_"
+        // Nome curto para respeitar o limite do MongoDB Atlas
+        databaseName = "dosecerta_test_t_"
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
         connection = new MongoConnection(mongoUri, databaseName);
