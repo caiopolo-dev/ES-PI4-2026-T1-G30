@@ -11,8 +11,20 @@ import java.util.NoSuchElementException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
+
+import org.junit.jupiter.api.AfterEach;
+
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class DoseAccessServiceTest {
+    private MongoClient mongoClient;
+    private MongoDatabase testDatabase;
+
     private MongoPlannedDoseRepository doses;
     private MongoDoseRecordRepository records;
     private DoseAccessService service;
@@ -22,12 +34,43 @@ class DoseAccessServiceTest {
 
     @BeforeEach
     void setup() {
-        doses = new MongoPlannedDoseRepository();
-        records = new MongoDoseRecordRepository();
+        String uri = System.getenv("MONGODB_URI");
+
+        // Não executa os testes MongoDB sem uma conexão configurada.
+        assumeTrue(uri != null && !uri.isBlank(),
+                "MONGODB_URI não configurada");
+
+        mongoClient = MongoClients.create(uri);
+
+        // Banco exclusivo para cada teste, evitando misturar os dados.
+        String nomeBanco = "dosecerta_test_"
+                + UUID.randomUUID().toString().replace("-", "");
+
+        testDatabase = mongoClient.getDatabase(nomeBanco);
+
+        // Instancia os repositories usando o banco de teste.
+        doses = new MongoPlannedDoseRepository(testDatabase);
+        records = new MongoDoseRecordRepository(testDatabase);
+
         service = new DoseAccessService(doses, records, Clock.fixed(now, ZoneOffset.UTC));
         doses.save(dose("dose-a", "user-a", ScheduleStatus.SCHEDULED));
         doses.save(dose("dose-b", "user-b", ScheduleStatus.SCHEDULED));
         doses.save(dose("cancelled", "user-a", ScheduleStatus.CANCELLED));
+    }
+
+    @AfterEach
+    void limpar() {
+        try {
+            // Remove exclusivamente o banco temporário de testes.
+            if (testDatabase != null
+                    && testDatabase.getName().startsWith("dosecerta_test_")) {
+                testDatabase.drop();
+            }
+        } finally {
+            if (mongoClient != null) {
+                mongoClient.close();
+            }
+        }
     }
 
     private DosePrevista dose(String id, String user, ScheduleStatus status) {

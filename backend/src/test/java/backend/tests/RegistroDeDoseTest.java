@@ -1,5 +1,6 @@
-    package backend.tests;
+package backend.tests;
 
+import backend.models.DoseAction;
 import backend.models.RegistroDeDose;
 import org.junit.jupiter.api.Test;
 
@@ -17,14 +18,16 @@ public class RegistroDeDoseTest {
         RegistroDeDose registro = new RegistroDeDose(
                 "registro-001",
                 "dose-001",
-                RegistroDeDose.TAKEN,
+                "user-001",
+                DoseAction.TAKEN,
                 horarioReal,
                 horarioRegistro
         );
 
         assertEquals("registro-001", registro.getId());
         assertEquals("dose-001", registro.getPlannedDoseId());
-        assertEquals(RegistroDeDose.TAKEN, registro.getAction());
+        assertEquals("user-001", registro.getUserId());
+        assertEquals(DoseAction.TAKEN, registro.getAction());
         assertEquals(horarioReal, registro.getActualTime());
         assertEquals(horarioRegistro, registro.getRecordedAt());
     }
@@ -34,12 +37,13 @@ public class RegistroDeDoseTest {
         RegistroDeDose registro = new RegistroDeDose(
                 "registro-002",
                 "dose-001",
-                RegistroDeDose.SKIPPED,
+                "user-001",
+                DoseAction.SKIPPED,
                 null,
                 Instant.now()
         );
 
-        assertEquals(RegistroDeDose.SKIPPED, registro.getAction());
+        assertEquals(DoseAction.SKIPPED, registro.getAction());
         assertNull(registro.getActualTime());
     }
 
@@ -49,7 +53,8 @@ public class RegistroDeDoseTest {
                 new RegistroDeDose(
                         "registro-001",
                         "dose-001",
-                        RegistroDeDose.TAKEN,
+                        "user-001",
+                        DoseAction.TAKEN,
                         null,
                         Instant.now()
                 ));
@@ -61,7 +66,8 @@ public class RegistroDeDoseTest {
                 new RegistroDeDose(
                         "registro-001",
                         "dose-001",
-                        RegistroDeDose.SKIPPED,
+                        "user-001",
+                        DoseAction.SKIPPED,
                         Instant.now(),
                         Instant.now()
                 ));
@@ -73,22 +79,26 @@ public class RegistroDeDoseTest {
                 new RegistroDeDose(
                         "registro-001",
                         "dose-001",
-                        "LATE",
+                        "user-001",
+                        null,
                         null,
                         Instant.now()
                 ));
     }
 
     @Test
-    public void deveRejeitarIdInvalido() {
-        assertThrows(IllegalArgumentException.class, () ->
-                new RegistroDeDose(
-                        "",
-                        "dose-001",
-                        RegistroDeDose.SKIPPED,
-                        null,
-                        Instant.now()
-                ));
+    public void deveGerarIdAutomaticamente() {
+        RegistroDeDose registro = new RegistroDeDose(
+                "",
+                "dose-001",
+                "user-001",
+                DoseAction.SKIPPED,
+                null,
+                Instant.now()
+        );
+
+        assertNotNull(registro.getId());
+        assertFalse(registro.getId().isBlank());
     }
 
     @Test
@@ -97,7 +107,8 @@ public class RegistroDeDoseTest {
                 new RegistroDeDose(
                         "registro-001",
                         null,
-                        RegistroDeDose.SKIPPED,
+                        "user-001",
+                        DoseAction.SKIPPED,
                         null,
                         Instant.now()
                 ));
@@ -109,7 +120,8 @@ public class RegistroDeDoseTest {
                 new RegistroDeDose(
                         "registro-001",
                         "dose-001",
-                        RegistroDeDose.SKIPPED,
+                        "user-001",
+                        DoseAction.SKIPPED,
                         null,
                         null
                 ));
