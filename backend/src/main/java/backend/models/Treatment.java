@@ -274,14 +274,12 @@ public class Treatment {
 
         // Somente tratamentos ativos podem ser encerrados
         if (status != TreatmentStatus.ACTIVE) {
-            throw new IllegalStateException(
-                    "Somente tratamentos ativos podem ser encerrados");
+            throw new IllegalStateException("Somente tratamentos ativos podem ser encerrados");
         }
 
         // O instante do encerramento é obrigatório
         if (closedAt == null) {
-            throw new IllegalArgumentException(
-                    "Data de encerramento inválida");
+            throw new IllegalArgumentException("Data de encerramento inválida");
         }
 
         this.status = TreatmentStatus.CLOSED;
@@ -296,8 +294,7 @@ public class Treatment {
 
         // Somente tratamentos em DRAFT podem ser ativados
         if (status != TreatmentStatus.DRAFT) {
-            throw new IllegalStateException(
-                    "Somente tratamentos em DRAFT podem ser ativados");
+            throw new IllegalStateException("Somente tratamentos em DRAFT podem ser ativados");
         }
 
         // Verifica os dados e o cronograma antes de ativar
@@ -315,15 +312,13 @@ public class Treatment {
 
         // Somente rascunhos podem ter o período alterado
         if (status != TreatmentStatus.DRAFT) {
-            throw new IllegalStateException(
-                    "Somente tratamentos em DRAFT podem alterar o período");
+            throw new IllegalStateException("Somente tratamentos em DRAFT podem alterar o período");
         }
 
         // A data final não pode ser anterior à data inicial
         if (startDate != null && endDate != null
                 && endDate.isBefore(startDate)) {
-            throw new IllegalArgumentException(
-                    "A data final não pode anteceder a inicial");
+            throw new IllegalArgumentException("A data final não pode anteceder a inicial");
         }
 
         // Atualiza as datas somente após validar o período
@@ -335,23 +330,19 @@ public class Treatment {
     private void validarDadosAtivacao() {
 
         if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException(
-                    "O tratamento deve possuir um nome");
+            throw new IllegalArgumentException("O tratamento deve possuir um nome");
         }
 
         if (startDate == null) {
-            throw new IllegalArgumentException(
-                    "A data de início é obrigatória");
+            throw new IllegalArgumentException("A data de início é obrigatória");
         }
 
         if (endDate != null && endDate.isBefore(startDate)) {
-            throw new IllegalArgumentException(
-                    "A data final não pode anteceder a inicial");
+            throw new IllegalArgumentException("A data final não pode anteceder a inicial");
         }
 
         if (!possuiCronogramaValido()) {
-            throw new IllegalArgumentException(
-                    "O tratamento precisa de um medicamento com cronograma válido");
+            throw new IllegalArgumentException("O tratamento precisa de um medicamento com cronograma válido");
         }
     }
 
