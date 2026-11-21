@@ -37,6 +37,10 @@ public class CronogramaDose {
     private final String timezone;
     private final boolean active;
 
+    // Guardei os valores na versao porque o cadastro do medicamento pode mudar depois.
+    private final Integer quantityPerAdministrationSnapshot;
+    private final String unitSnapshot;
+
     // Novo construtor: recebe a frequência explicitamente.
     // issue 28 - Mantém a assinatura antiga e encaminha a validação ao construtor com vigência.
     public CronogramaDose(
@@ -65,6 +69,25 @@ public class CronogramaDose {
             boolean active,
             Instant validFrom,
             Instant validTo) {
+
+        this(version, frequency, daysOfWeek, times, startDate, endDate, timezone,
+                active, validFrom, validTo, null, null);
+    }
+
+    public CronogramaDose(
+            int version, ScheduleFrequency frequency, List<String> daysOfWeek,
+            List<String> times, String startDate, String endDate, String timezone,
+            boolean active, Instant validFrom, Instant validTo,
+            Integer quantityPerAdministrationSnapshot, String unitSnapshot) {
+
+        if ((quantityPerAdministrationSnapshot == null) != (unitSnapshot == null)
+                || (quantityPerAdministrationSnapshot != null
+                    && (quantityPerAdministrationSnapshot <= 0 || unitSnapshot.isBlank()))) {
+            throw new IllegalArgumentException("Quantidade e unidade historicas devem ser completas e validas.");
+        }
+
+        this.quantityPerAdministrationSnapshot = quantityPerAdministrationSnapshot;
+        this.unitSnapshot = unitSnapshot == null ? null : unitSnapshot.trim();
 
         if (version < 1) {
             throw new IllegalArgumentException(
@@ -300,6 +323,20 @@ public class CronogramaDose {
         return active;
     }
 
+    public Integer getQuantityPerAdministrationSnapshot() {
+        return quantityPerAdministrationSnapshot;
+    }
+
+    public String getUnitSnapshot() {
+        return unitSnapshot;
+    }
+
+    public CronogramaDose withAdministration(Integer quantity, String unit) {
+
+        return new CronogramaDose(version, frequency, daysOfWeek, times,
+                startDate, endDate, timezone, active, validFrom, validTo, quantity, unit);
+    }
+
     public CronogramaDose withActive(boolean newActive) {
         if (active == newActive) {
             return this;
@@ -309,7 +346,7 @@ public class CronogramaDose {
         return new CronogramaDose(
                 version, frequency, daysOfWeek, times,
                 startDate, endDate, timezone, newActive,
-                validFrom, validTo);
+                validFrom, validTo, quantityPerAdministrationSnapshot, unitSnapshot);
     }
 
     public CronogramaDose withVersion(int newVersion) {
@@ -321,7 +358,7 @@ public class CronogramaDose {
         return new CronogramaDose(
                 newVersion, frequency, daysOfWeek, times,
                 startDate, endDate, timezone, active,
-                validFrom, validTo);
+                validFrom, validTo, quantityPerAdministrationSnapshot, unitSnapshot);
     }
 
 
@@ -330,7 +367,8 @@ public class CronogramaDose {
         if (Objects.equals(validFrom, from) &&Objects.equals(validTo, to)) {
             return this;
         }
-        return new CronogramaDose(version, frequency, daysOfWeek, times,startDate, endDate, timezone, active,from, to);
+        return new CronogramaDose(version, frequency, daysOfWeek, times, startDate, endDate,
+                timezone, active, from, to, quantityPerAdministrationSnapshot, unitSnapshot);
     }
 
 
@@ -365,7 +403,7 @@ public class CronogramaDose {
                 newStartDate,
                 newEndDate,
                 newTimezone == null ? timezone : newTimezone,
-                true);
+                true).withAdministration(quantityPerAdministrationSnapshot, unitSnapshot);
     }
 
     public CronogramaDose nextVersion(
@@ -374,7 +412,8 @@ public class CronogramaDose {
 
         return new CronogramaDose(
                 version + 1, frequency, daysOfWeek,
-                newTimes, newStartDate, endDate, timezone, true);
+                newTimes, newStartDate, endDate, timezone, true)
+                .withAdministration(quantityPerAdministrationSnapshot, unitSnapshot);
     }
 
     // issue 28
@@ -410,7 +449,9 @@ public class CronogramaDose {
                 && Objects.equals(timezone, that.timezone)
                 // issue 28 - Diferencia versões com períodos de vigência distintos.
                 && Objects.equals(validFrom, that.validFrom)
-                && Objects.equals(validTo, that.validTo);
+                && Objects.equals(validTo, that.validTo)
+                && Objects.equals(quantityPerAdministrationSnapshot, that.quantityPerAdministrationSnapshot)
+                && Objects.equals(unitSnapshot, that.unitSnapshot);
     }
 
     @Override
@@ -419,7 +460,7 @@ public class CronogramaDose {
         return Objects.hash(
                 version, frequency, daysOfWeek, times,
                 startDate, endDate, timezone, active,
-                validFrom, validTo);
+                validFrom, validTo, quantityPerAdministrationSnapshot, unitSnapshot);
     }
 
     @Override

@@ -271,6 +271,15 @@ public class ScheduleService {
                 context, treatmentId, medicationId
         );
 
+        // Mantive os valores da ultima versao para uma troca de horario nao perder quantidade/unidade.
+        CronogramaDose referencia = medicamento.getActiveSchedule().orElse(null);
+        Integer quantidade = referencia == null ? null : referencia.getQuantityPerAdministrationSnapshot();
+        String unidade = referencia == null ? null : referencia.getUnitSnapshot();
+
+        if (quantidade != null) {
+            novaVersao = novaVersao.withAdministration(quantidade, unidade);
+        }
+
         List<CronogramaDose> historico = medicamento.getSchedules();
 
         // issue 28 - Valida todos os intervalos existentes antes de preparar qualquer alteração.
@@ -316,6 +325,10 @@ public class ScheduleService {
                                 inicioVigencia
                         )
                         .deactivate();
+
+                if (encerrado.getQuantityPerAdministrationSnapshot() == null && quantidade != null) {
+                    encerrado = encerrado.withAdministration(quantidade, unidade);
+                }
 
                 atualizado.add(encerrado);
 

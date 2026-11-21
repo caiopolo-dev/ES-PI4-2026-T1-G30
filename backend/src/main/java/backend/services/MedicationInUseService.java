@@ -5,6 +5,7 @@ import backend.auth.ResourceNotFoundException;
 import backend.models.MedicamentoEmUso;
 import backend.repositories.MedicationInUseRepository;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.time.Instant;
 
@@ -55,8 +56,23 @@ public final class MedicationInUseService {
             }
             // Reutiliza o versionamento da #28 sem duplicar suas regras ou persistir separadamente.
             var history = schedules.prepararTransicao(context, treatmentId, medicationId, current, validFrom);
+            var versioned = new ArrayList<backend.models.CronogramaDose>();
+
+            for (var schedule : history) {
+
+                if (schedule.isActive()) {
+                    schedule = schedule.withAdministration(updated.getQuantity(), updated.getUnit());
+                } else if (schedule.getVersion() == current.getVersion()
+                        && schedule.getQuantityPerAdministrationSnapshot() == null) {
+                    // Capturei a versao que estou encerrando; versoes mais antigas ficam intactas.
+                    schedule = schedule.withAdministration(previous.getQuantity(), previous.getUnit());
+                }
+
+                versioned.add(schedule);
+            }
+
             var prepared = new MedicamentoEmUso(updated.getId(), updated.getName(), updated.getDose(), updated.getQuantity(),
-                updated.getUnit(), updated.getObservations(), true, history, expectedRevision);
+                updated.getUnit(), updated.getObservations(), true, versioned, expectedRevision);
             return new PreparedMedicationChange(previous, prepared, validFrom);
         } catch (MedicationOperationConflictException conflict) {
             throw conflict;

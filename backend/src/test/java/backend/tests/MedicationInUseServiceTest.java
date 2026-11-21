@@ -31,7 +31,13 @@ class MedicationInUseServiceTest {
         assertEquals("comprimido", prepared.previous().getUnit());
         assertEquals(2, prepared.updated().getQuantity());
         assertEquals("mL", prepared.updated().getUnit());
-        assertEquals(history, prepared.updated().getSchedules());
+        var versions = prepared.updated().getSchedules();
+        assertEquals(history.get(0).withAdministration(1, "comprimido"), versions.get(0));
+        assertEquals(history.get(1).withAdministration(2, "mL"), versions.get(1));
+        assertEquals(1, versions.get(0).getQuantityPerAdministrationSnapshot());
+        assertEquals("comprimido", versions.get(0).getUnitSnapshot());
+        assertEquals(2, versions.get(1).getQuantityPerAdministrationSnapshot());
+        assertEquals("mL", versions.get(1).getUnitSnapshot());
         assertEquals(0L, prepared.updated().getRevision());
         assertEquals(effective, prepared.validFrom());
         assertEquals(List.of(previousSchedule), service.find(a, "t", "m").getSchedules());

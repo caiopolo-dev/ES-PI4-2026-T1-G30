@@ -13,7 +13,9 @@ import org.bson.Document;
 
 /** Converte HTTP nas operacoes do servico de medicamentos da #27. */
 public final class MedicationInUseHandler implements HttpHandler {
-    private static final Set<String> FIELDS = Set.of("name", "informedDose", "quantityPerAdministration", "unit", "notes", "revision");
+    private static final Set<String> FIELDS = Set.of(
+        "name", "informedDose", "quantityPerAdministration", "unit", "notes", "revision", "validFrom"
+    );
     private final MedicationInUseService service;
 
     public MedicationInUseHandler(MedicationInUseService service) {
@@ -47,7 +49,9 @@ public final class MedicationInUseHandler implements HttpHandler {
             boolean edit = request.getMethod().equals("PUT") && path.length == 5;
             if (!create && !edit) { return HttpResponse.methodNotAllowed("Metodo nao permitido."); }
             Document data = parseBody(request);
-            if (create && data.containsKey("revision")) { throw new IllegalArgumentException("Revisao e gerada pelo servidor."); }
+            if (create && (data.containsKey("revision") || data.containsKey("validFrom"))) {
+                throw new IllegalArgumentException("Revisao e vigencia nao pertencem ao cadastro inicial.");
+            }
             long revision = edit ? revision(data) : 0L;
             Integer quantity = quantity(data);
             String name = text(data, "name");
@@ -57,9 +61,31 @@ public final class MedicationInUseHandler implements HttpHandler {
             if (name == null || name.isBlank() || dose == null || dose.isBlank()) {
                 return HttpResponse.badRequest("Nome e dose informada obrigatorios no modelo atual.");
             }
-            MedicamentoEmUso medication = create
-                ? service.add(context, path[2], name, dose, quantity, unit, notes)
-                : service.update(context, path[2], path[4], name, dose, quantity, unit, notes, revision);
+            MedicamentoEmUso medication;
+
+            if (create) {
+                medication = service.add(context, path[2], name, dose, quantity, unit, notes);
+            } else if (data.containsKey("validFrom")) {
+                String validFrom = text(data, "validFrom");
+
+                if (validFrom == null || validFrom.isBlank()) {
+                    throw new IllegalArgumentException("Inicio de vigencia obrigatorio.");
+                }
+
+                java.time.Instant effective;
+
+                try {
+                    effective = java.time.Instant.parse(validFrom);
+                } catch (java.time.format.DateTimeParseException invalid) {
+                    throw new IllegalArgumentException("Vigencia invalida.", invalid);
+                }
+
+                // Encaminhei a edicao com vigencia para gravar medicamento e versoes juntos.
+                medication = service.saveVersionedUpdate(context, path[2], path[4], name, dose,
+                    quantity, unit, notes, revision, effective);
+            } else {
+                medication = service.update(context, path[2], path[4], name, dose, quantity, unit, notes, revision);
+            }
             return new HttpResponse(create ? 201 : 200, create ? "Created" : "OK", toJson(medication));
         } catch (IllegalArgumentException invalid) {
             return HttpResponse.badRequest("Dados de medicamento invalidos.");

@@ -161,6 +161,8 @@ public final class ScheduleHandler implements HttpHandler {
     // issue 28 - Mantém os nomes já usados pelo domínio e expõe a vigência em ISO-8601.
     private Document toDocument(CronogramaDose schedule) {
         return new Document("version", schedule.getVersion())
+                .append("quantityPerAdministrationSnapshot", schedule.getQuantityPerAdministrationSnapshot())
+                .append("unitSnapshot", schedule.getUnitSnapshot())
                 .append("frequency", schedule.getFrequency().name())
                 .append("daysOfWeek", schedule.getDaysOfWeek())
                 .append("times", schedule.getTimes())

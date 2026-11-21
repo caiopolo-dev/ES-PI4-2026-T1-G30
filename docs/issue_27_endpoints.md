@@ -1,7 +1,8 @@
 # Issue #27 — medicamentos em uso
 
-Revisão de 21/11/2026. **Entrega parcial:** operações básicas integradas à #26;
-integração de quantidade/unidade com o histórico da #28 ainda pendente.
+Revisão de 21/11/2026. Operações básicas integradas à #26 e edição de
+quantidade/unidade conectada ao versionamento da #28, com persistência e HTTP
+testados. Os pontos de alinhamento com a equipe estão discriminados ao final.
 
 ## API disponível
 
@@ -54,6 +55,38 @@ active e revision. A consulta da #26 mantém os nomes existentes dose, quantity
 e observations, além de id, name, unit, active, revision e schedules.
 O consumidor deve fazer essa correspondência ao montar o PUT.
 
+### Edição de quantidade/unidade com cronograma
+
+Quando o medicamento já possui cronograma, envie `validFrom` no PUT para criar
+uma nova versão com a quantidade/unidade desejadas. Exemplo fictício:
+
+```http
+PUT /treatments/{id}/medications/{medicationId}
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Medicamento X",
+  "informedDose": "50 mg",
+  "quantityPerAdministration": 2,
+  "unit": "comprimido",
+  "notes": "",
+  "revision": 1,
+  "validFrom": "2026-12-01T11:00:00Z"
+}
+```
+
+Use uma vigência futura no momento da requisição e a revisão efetivamente
+consultada. A vigência deve ser posterior à da última versão e respeitar o período
+do tratamento/cronograma. O resultado é `200`, com medicamento e revisão atualizados.
+Sem `validFrom`, a edição comum continua retornando `409` se tentar mudar
+quantidade/unidade de um medicamento com cronogramas. POST não aceita `validFrom`.
+No fluxo versionado, os dados devem estar completos e a quantidade ou unidade
+deve realmente mudar. Datas inválidas/passadas recebem `400`; revisão antiga,
+medicamento inativo ou tratamento encerrado recebem `409`.
+
 | Código | Situação |
 | --- | --- |
 | 400 | Corpo, campos, tipos, quantidade ou revisão inválidos; query não suportada |
@@ -94,20 +127,31 @@ e início de vigência futuro/posterior ao início conhecido da versão atual.
 saveVersionedUpdate() grava medicamento e versões juntos, com um único comando
 MongoDB e um incremento de revision, usando updateWithSchedules().
 
-**O endpoint ainda não chama esse fluxo.** PUT continua bloqueando quantidade/
-unidade quando existem cronogramas. validFrom não é aceito no JSON atual.
-Não existe exemplo HTTP de sucesso dessa alteração nesta entrega.
+O PUT chama esse fluxo quando recebe validFrom. Cada versão persiste
+quantityPerAdministrationSnapshot e unitSnapshot no próprio cronograma, sem
+repository ou coleção paralela. A versão encerrada mantém os valores anteriores;
+a nova recebe os valores solicitados. As cópias do modelo, a leitura BSON e as
+alterações posteriores de horário preservam esses campos.
 
-**Limitação:** a gravação conjunta não guarda quantidade/unidade antigas em cada
-versão. Uma nova versão de horários não resolve esse histórico. Falta acordar
-essa representação com a #28 e então conectar o endpoint. Não criamos histórico
-paralelo nem extensão unilateral no modelo da #28.
+O GET `/treatments/{id}/medications/{medicationId}/schedule` expõe esses campos
+em current/versions. O consumidor deve selecionar a versão pela vigência e usar
+seus snapshots, pois quantity/unit no medicamento representam a última edição
+cadastrada, inclusive quando ela só começa a valer no futuro.
+
+**Compatibilidade:** documentos anteriores continuam legíveis com snapshots null.
+Na primeira mudança de quantidade, captura-se o valor conhecido da versão atual
+que está sendo encerrada; versões históricas mais antigas não são preenchidas
+com valores atuais. Quando a versão consultada tem snapshot null, a informação
+histórica continua desconhecida; não há reconstrução automática do passado.
+
+Essa é a estratégia implementada nesta branch para a integração #27/#28; a
+implementação não representa confirmação de revisão conjunta pelos colegas.
 O fluxo não gera, cancela ou altera doses previstas. Cronogramas legados sem
 início de vigência conhecido não são substituídos inventando datas históricas.
 
 ## Testes e execução
 
-Última execução: **263 testes, zero falhas, zero erros e zero ignorados**, com
+Última execução: **275 testes, zero falhas, zero erros e zero ignorados**, com
 MongoDB local. Atlas não foi utilizado. As falhas antigas de conexão não aparecem
 nesta base atualizada; os resultados anteriores foram substituídos por esta rodada.
 
@@ -116,8 +160,11 @@ servidor HTTP com sessões reais, leitura por outra conexão, preparação sem e
 e gravação conjunta. Um teste existente disputa duas gravações da mesma revisão,
 uma de quantidade e outra de unidade: apenas uma vence, sem misturar os dados,
 preservando versões anteriores e outro medicamento.
-O novo fluxo conjunto foi testado por serviço/repository com MongoDB; isso não
-comprova um PUT HTTP de quantidade versionada, pois ele ainda não foi conectado.
+O fluxo conjunto também foi testado pelo PUT HTTP, com sessão real e MongoDB:
+mudança de quantidade/unidade, bloqueio de outro titular, datas inválidas/passadas,
+revisão antiga, fronteira exata da vigência, alteração posterior de horário e
+recuperação dos snapshots por outra conexão após encerramento do tratamento.
+Os testes existentes foram ampliados; nenhuma classe de teste nova foi criada.
 
 Com JDK 21, Maven e MongoDB local iniciado, executar na raiz do repositório:
 
@@ -142,9 +189,12 @@ testes podem ser ignorados; isso não equivale a aprovação.
 | Desativar preservando referências históricas | Implementado, sem exclusão física |
 | Alterar um medicamento sem sobrescrever outros | Implementado e testado, inclusive sob concorrência |
 | Bloquear alteração em tratamento alheio | Implementado e testado |
-| Quantidade com impacto futuro segue versionamento acordado | Parcial: preparação/gravação interna existem; histórico de quantidade/unidade e integração HTTP pendentes |
+| Quantidade com impacto futuro segue versionamento acordado | Implementado e testado por HTTP/MongoDB com snapshots por versão; revisão conjunta da estratégia ainda não confirmada |
 | Cadastro sem CMED, SerpApi ou preços | Atendido |
 
-Para concluir: fechar os contratos pendentes, coordenar a validação de ativação,
-conectar o endpoint ao fluxo completo e testar esse caminho por HTTP.
+Para concluir formalmente: confirmar os contratos pendentes com a equipe e
+coordenar a validação de ativação com o responsável pela #26. O endpoint de
+edição versionada já está conectado e testado. A integração do gerador com os
+snapshots e a política para doses futuras materializadas pertencem ao módulo de
+doses; não foram implementadas nesta alteração.
 **A #27 não deve ser encerrada como concluída apenas porque a suíte passou.**

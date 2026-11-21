@@ -423,7 +423,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 && Objects.equals(a.getEndDate(), b.getEndDate())
                 && Objects.equals(a.getTimezone(), b.getTimezone())
                 && Objects.equals(a.getValidFrom(), b.getValidFrom())
-                && Objects.equals(a.getValidTo(), b.getValidTo());
+                && Objects.equals(a.getValidTo(), b.getValidTo())
+                && Objects.equals(a.getQuantityPerAdministrationSnapshot(), b.getQuantityPerAdministrationSnapshot())
+                && Objects.equals(a.getUnitSnapshot(), b.getUnitSnapshot());
     }
 
     private void validateTreatmentDomain(Treatment treatment) {
@@ -571,6 +573,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
     // issue 28 - Centraliza o formato BSON de todas as versões do cronograma.
     static Document toScheduleDocument(CronogramaDose schedule) {
         return new Document()
+                .append("quantityPerAdministrationSnapshot", schedule.getQuantityPerAdministrationSnapshot())
+                .append("unitSnapshot", schedule.getUnitSnapshot())
                 .append("version", schedule.getVersion())
                 .append("frequency", schedule.getFrequency().name())
                 .append("daysOfWeek", schedule.getDaysOfWeek() != null
@@ -613,7 +617,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 schedDoc.getString("timezone"),
                 activeRaw == null || activeRaw,
                 parseInstant(schedDoc.get("validFrom")),
-                parseInstant(schedDoc.get("validTo"))
+                parseInstant(schedDoc.get("validTo")),
+                schedDoc.getInteger("quantityPerAdministrationSnapshot"),
+                schedDoc.getString("unitSnapshot")
         );
     }
 

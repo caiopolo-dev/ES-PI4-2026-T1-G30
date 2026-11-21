@@ -100,8 +100,9 @@ class MedicationInUseIntegrationTest {
                 var treatments = new MongoTreatmentRepository(connection.getDatabase());
                 var treatmentService = new backend.services.TreatmentService(treatments);
                 var medicationRepository = new MongoMedicationInUseRepository(connection.getCollection("treatments"));
+                var schedules = new backend.services.ScheduleService(treatments);
                 var service = new backend.services.MedicationInUseService(medicationRepository,
-                    new backend.services.DefaultTreatmentMedicationRules(treatmentService));
+                    new backend.services.DefaultTreatmentMedicationRules(treatmentService), schedules);
                 var sessions = new backend.services.SessionService(
                     new backend.repositories.MongoSessionRepository(connection.getCollection("auth_sessions")));
                 String token = sessions.create("a");
@@ -145,17 +146,15 @@ class MedicationInUseIntegrationTest {
                     assertEquals(201, incomplete.statusCode());
                     assertEquals(204, sendHttp(client, port, "DELETE", meds + "/" +
                         Document.parse(incomplete.body()).getString("id"), token, "").statusCode());
-                    // Cronograma como dado de teste; o versionamento sera integrado nas proximas etapas.
-                    var treatment = treatments.findById(id).orElseThrow();
-                    var medication = treatment.findMedicationById(medicationId).orElseThrow();
-                    medication.addScheduleVersion(new backend.models.CronogramaDose(
-                        List.of("08:00"), "2026-11-19", "America/Sao_Paulo"));
-                    treatment.addMedication(medication);
-                    treatments.update(treatment);
+                    var initial = new backend.models.CronogramaDose(
+                        List.of("08:00"), "2026-11-19", "America/Sao_Paulo");
+                    var owner = new backend.auth.AuthContext("a");
+                    schedules.salvar(owner, id, medicationId, initial,
+                        java.time.Instant.parse("2026-11-19T03:00:00Z"), 0);
                     assertEquals(200, sendHttp(client, port, "POST", path + "/activate", token, "").statusCode());
                     assertEquals(409, sendHttp(client, port, "POST", meds, token,
                         "{\"name\":\"Incompleto\",\"informedDose\":\"10 mg\"}").statusCode());
-                    String edit = body.substring(0, body.length() - 1) + ",\"revision\":0,\"notes\":\"Editado\"}";
+                    String edit = body.substring(0, body.length() - 1) + ",\"revision\":1,\"notes\":\"Editado\"}";
                     assertEquals(404, sendHttp(client, port, "PUT", item, foreignToken, edit).statusCode());
                     assertEquals(200, sendHttp(client, port, "PUT", item, token, edit).statusCode());
                     assertEquals(409, sendHttp(client, port, "PUT", item, token, edit).statusCode());
@@ -164,24 +163,71 @@ class MedicationInUseIntegrationTest {
                     assertEquals(200, consulted.statusCode());
                     var returned = Document.parse(consulted.body()).getList("medications", Document.class).stream()
                         .filter(m -> medicationId.equals(m.getString("id"))).findFirst().orElseThrow();
-                    assertEquals(1L, ((Number) returned.get("revision")).longValue());
+                    assertEquals(2L, ((Number) returned.get("revision")).longValue());
                     assertEquals("comprimido", returned.getString("unit"));
                     assertTrue(returned.getBoolean("active"));
                     assertEquals("Editado", returned.getString("observations"));
                     assertEquals(404, sendHttp(client, port, "GET", path, foreignToken, "").statusCode());
+
+                    // Fiz a edicao pelo HTTP para verificar o mesmo caminho usado pelo cliente.
+                    var effective = java.time.Instant.now().plusSeconds(86400);
+                    String versionedEdit = new Document("name", "Demo")
+                        .append("informedDose", "50 mg")
+                        .append("quantityPerAdministration", 2)
+                        .append("unit", "mL")
+                        .append("revision", 2)
+                        .append("validFrom", effective.toString()).toJson();
+
+                    var beforeVersioning = connection.getCollection("treatments").find().first();
+                    assertEquals(401, sendHttp(client, port, "PUT", item, null, versionedEdit).statusCode());
+                    assertEquals(404, sendHttp(client, port, "PUT", item, foreignToken, versionedEdit).statusCode());
+                    assertEquals(400, sendHttp(client, port, "PUT", item, token,
+                        versionedEdit.replace(effective.toString(), "data-invalida")).statusCode());
+                    assertEquals(400, sendHttp(client, port, "PUT", item, token,
+                        versionedEdit.replace(effective.toString(), java.time.Instant.now().minusSeconds(60).toString())).statusCode());
+                    assertEquals(beforeVersioning, connection.getCollection("treatments").find().first());
+
+                    var versionedResponse = sendHttp(client, port, "PUT", item, token, versionedEdit);
+                    assertEquals(200, versionedResponse.statusCode(), versionedResponse.body());
+                    assertEquals(3L, ((Number) Document.parse(versionedResponse.body()).get("revision")).longValue());
+                    assertEquals(409, sendHttp(client, port, "PUT", item, token, versionedEdit).statusCode());
+
+                    var oldVersion = schedules.consultarNoInstante(owner, id, medicationId,
+                        effective.minusNanos(1)).orElseThrow();
+                    var newVersion = schedules.consultarNoInstante(owner, id, medicationId, effective).orElseThrow();
+                    assertEquals(1, oldVersion.getQuantityPerAdministrationSnapshot());
+                    assertEquals("comprimido", oldVersion.getUnitSnapshot());
+                    assertEquals(2, newVersion.getQuantityPerAdministrationSnapshot());
+                    assertEquals("mL", newVersion.getUnitSnapshot());
+                    assertEquals(effective, oldVersion.getValidTo());
+
+                    // Trocar o horario depois nao pode apagar a quantidade da versao anterior.
+                    schedules.salvar(owner, id, medicationId,
+                        new backend.models.CronogramaDose(List.of("09:00"), "2026-11-19", "America/Sao_Paulo"),
+                        effective.plusSeconds(86400), 3);
+                    var latest = schedules.consultarHistorico(owner, id, medicationId).get(2);
+                    assertEquals(2, latest.getQuantityPerAdministrationSnapshot());
+                    assertEquals("mL", latest.getUnitSnapshot());
+                    assertEquals(List.of("09:00"), latest.getTimes());
+
                     assertEquals(200, sendHttp(client, port, "POST", path + "/close", token, "").statusCode());
                     var collection = connection.getCollection("treatments");
                     Document before = collection.find().first();
                     assertEquals(409, sendHttp(client, port, "POST", meds, token, body).statusCode());
-                    assertEquals(409, sendHttp(client, port, "PUT", item, token, edit.replace("\"revision\":0", "\"revision\":1")).statusCode());
+                    assertEquals(409, sendHttp(client, port, "PUT", item, token,
+                        versionedEdit.replace("\"revision\": 2", "\"revision\": 4")).statusCode());
                     assertEquals(409, sendHttp(client, port, "DELETE", item, token, "").statusCode());
                     assertEquals(before, collection.find().first());
                     assertEquals(200, sendHttp(client, port, "GET", path, token, "").statusCode());
                     try (var reopened = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
                         var restored = new MongoMedicationInUseRepository(reopened.getCollection("treatments"))
                             .find(id, "a", medicationId).orElseThrow();
-                        assertEquals(1, restored.getSchedules().size());
-                        assertEquals(1L, restored.getRevision());
+                        assertEquals(3, restored.getSchedules().size());
+                        assertEquals(4L, restored.getRevision());
+                        assertEquals(1, restored.getScheduleByVersion(1).orElseThrow().getQuantityPerAdministrationSnapshot());
+                        assertEquals("comprimido", restored.getScheduleByVersion(1).orElseThrow().getUnitSnapshot());
+                        assertEquals(2, restored.getScheduleByVersion(2).orElseThrow().getQuantityPerAdministrationSnapshot());
+                        assertEquals("mL", restored.getScheduleByVersion(2).orElseThrow().getUnitSnapshot());
                     }
                 } finally { server.parar(); thread.join(3000); assertFalse(thread.isAlive()); }
             } finally { connection.getDatabase().drop(); }
