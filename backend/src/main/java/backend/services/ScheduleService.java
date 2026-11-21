@@ -1,4 +1,4 @@
-// Caio Ferreira Polo
+// Autor: Caio Ferreira Polo
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -232,8 +232,15 @@ public class ScheduleService {
             }
 
             if (atual.getRevision() != expectedRevision) {
-                throw new MedicationOperationConflictException(
-                        "Cronograma alterado. Consulte os dados novamente.");
+                throw new MedicationOperationConflictException("Cronograma alterado. Consulte os dados novamente.");
+            }
+
+            // Impede que uma nova configuração modifique doses históricas.
+            // Retransmissões de configurações existentes continuam permitidas.
+            if (tratamento.getStatus() == TreatmentStatus.ACTIVE
+                    && inicioVigencia.isBefore(Instant.now())) {
+
+                throw new IllegalArgumentException("Não é permitido alterar retroativamente um cronograma ativo");
             }
 
             List<CronogramaDose> atualizado = prepararTransicao(
@@ -261,8 +268,7 @@ public class ScheduleService {
                     return reconciliarDoses(context, treatmentId, concorrente);
                 }
 
-                throw new MedicationOperationConflictException(
-                        "Cronograma alterado durante a gravação.");
+                throw new MedicationOperationConflictException("Cronograma alterado durante a gravação.");
             }
 
             MedicamentoEmUso medicamentoAtualizado = accessService.findMedication(

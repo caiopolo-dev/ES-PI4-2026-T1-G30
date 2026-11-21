@@ -292,4 +292,66 @@ public class DoseGenerationServiceTest {
         verify(plannedDoseRepository, never()).saveAll(anyList());
     }
 
+
+
+    @Test
+    void deveCancelarDosesApartirDaDesativacaoOriginal() {
+
+        Instant desativacao = agora.minusSeconds(3600);
+
+        CronogramaDose cronograma = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        );
+
+        MedicamentoEmUso desativado = new MedicamentoEmUso(
+                "med-2",
+                "Medicamento desativado",
+                "50 mg",
+                1,
+                "comprimido",
+                null,
+                false,
+                List.of(cronograma),
+                1L,
+                desativacao
+        );
+
+        Treatment base = criarTratamento(TreatmentStatus.ACTIVE);
+
+        Treatment tratamento = new Treatment(
+                "trat-1",
+                "user-1",
+                "Tratamento de teste",
+                null,
+                LocalDate.of(2026, 11, 21),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
+                List.of(base.getMedications().get(0), desativado)
+        );
+
+        when(treatmentRepository.findByIdAndUserId("trat-1", "user-1"))
+                .thenReturn(Optional.of(tratamento));
+
+        when(plannedDoseRepository.saveAll(anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<DosePrevista> doses = service.reconcile("user-1", "trat-1");
+
+        // Utiliza o instante original da desativação, não o atual.
+        verify(plannedDoseRepository)
+                .cancelScheduledForMedicationVersionFrom(
+                        "user-1", "trat-1", "med-2", 1, desativacao
+                );
+
+        assertFalse(doses.isEmpty());
+
+        // Nenhuma nova ocorrência deve pertencer ao medicamento desativado.
+        assertTrue(doses.stream().noneMatch(
+                dose -> dose.getMedicationInUseId().equals("med-2")
+        ));
+    }
+
 }

@@ -1,3 +1,4 @@
+// Autores: Caio Ferreira Polo, Cauã Bianchi Ferroni, Samuel Campovilla
 package backend.repositories;
 
 import backend.models.CronogramaDose;
@@ -50,6 +51,25 @@ public interface TreatmentRepository {
             long expectedRevision,
             List<CronogramaDose> schedules) {
         throw new UnsupportedOperationException("Atualização de cronogramas não suportada");
+    }
+
+    // record é um tipo especial de classe utilizado para armazenar
+    // e transportar dados de maneira simples.
+    //
+    // O Java gera automaticamente o construtor, os métodos de acesso
+    // aos atributos, equals(), hashCode() e toString().
+    //
+    // Seus atributos são final, impedindo que sejam reatribuídos.
+    //
+    // Utilizamos um record neste caso pois precisamos apenas transportar
+    // os identificadores do usuário e do tratamento.
+    record ReconciliationTarget(String userId, String treatmentId) {
+    }
+
+    // Recupera os tratamentos ativos e encerrados que devem ser reconciliados.
+    default List<ReconciliationTarget> findDoseReconciliationTargets() {
+
+        throw new UnsupportedOperationException("Consulta para reconciliação não implementada");
     }
 }
 

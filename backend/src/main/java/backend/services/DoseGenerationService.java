@@ -179,25 +179,45 @@ public class DoseGenerationService {
                 return List.of();
             }
 
-            // Identifica versões que possuem término de vigência.
+
+            // Recupera o instante atual para tratamento de documentos legados.
+            Instant agora = clock.instant();
+
             for (MedicamentoEmUso medicamento : treatment.getMedications()) {
 
                 for (CronogramaDose cronograma : medicamento.getSchedules()) {
 
-                    if (cronograma.getValidTo() != null) {
+                    Instant limite = cronograma.getValidTo();
 
-                        // Cancela somente as ocorrências posteriores
-                        // ou iguais ao término da vigência da versão.
+                    if (!medicamento.isActive()) {
+
+                        Instant desativacao = medicamento.getDeactivatedAt();
+
+                        // Documentos antigos podem não possuir esse instante.
+                        // Nesse caso, preservamos o passado e cancelamos a partir de agora.
+                        if (desativacao == null) {
+                            desativacao = agora;
+                        }
+
+                        // Considera o primeiro instante em que a regra deixou de valer.
+                        if (limite == null || desativacao.isBefore(limite)) {
+                            limite = desativacao;
+                        }
+                    }
+
+                    if (limite != null) {
+
                         plannedDoseRepository.cancelScheduledForMedicationVersionFrom(
                                 userId,
                                 treatmentId,
                                 medicamento.getId(),
                                 cronograma.getVersion(),
-                                cronograma.getValidTo()
+                                limite
                         );
                     }
                 }
             }
+
 
             // Completa a janela móvel utilizando as versões válidas.
             return refreshRollingWindow(userId, treatmentId);

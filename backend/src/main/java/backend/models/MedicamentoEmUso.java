@@ -1,3 +1,4 @@
+// Autores: Cauã Bianchi Ferroni (Principal), Miguel Batista Gallinucci, Samuel Campovilla
 package backend.models;
 
 import java.util.ArrayList;
@@ -6,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 /**
  * Representa um medicamento em uso dentro de um tratamento.
@@ -23,6 +25,10 @@ public class MedicamentoEmUso {
     private long revision;
     private String observations;
     private final List<CronogramaDose> schedules;
+
+    // Armazena quando o medicamento foi desativado.
+    // Permite cancelar as doses futuras sem alterar o histórico anterior.
+    private Instant deactivatedAt;
 
     public MedicamentoEmUso(
             String id,
@@ -69,19 +75,47 @@ public class MedicamentoEmUso {
         this.active = active;
     }
 
-    public MedicamentoEmUso(String id, String name, String dose, Integer quantity,
-            String unit, String observations, boolean active, List<CronogramaDose> schedules, long revision) {
-        this(id, name, dose, quantity, unit, observations, active, schedules);
-        if (revision < 0) { throw new IllegalArgumentException("Revisao invalida."); }
-        this.revision = revision;
+
+    public MedicamentoEmUso(
+            String id, String name, String dose, Integer quantity,
+            String unit, String observations, boolean active,
+            List<CronogramaDose> schedules, long revision) {
+
+        this(id, name, dose, quantity, unit, observations,
+                active, schedules, revision, null);
     }
+
+    public MedicamentoEmUso(
+            String id, String name, String dose, Integer quantity,
+            String unit, String observations, boolean active,
+            List<CronogramaDose> schedules, long revision,
+            Instant deactivatedAt) {
+
+        this(id, name, dose, quantity, unit, observations, active, schedules);
+
+        if (revision < 0) {
+            throw new IllegalArgumentException("Revisão inválida");
+        }
+
+        if (active && deactivatedAt != null) {
+            throw new IllegalArgumentException("Medicamento ativo não pode possuir data de desativação");
+        }
+
+        this.revision = revision;
+        this.deactivatedAt = deactivatedAt;
+    }
+
 
     public long getRevision() {
         return revision;
     }
 
     public MedicamentoEmUso withRevision(long nextRevision) {
-        return new MedicamentoEmUso(id, name, dose, quantity, unit, observations, active, schedules, nextRevision);
+
+        return new MedicamentoEmUso(
+                id, name, dose, quantity, unit, observations,
+                active, schedules, nextRevision, deactivatedAt
+        );
     }
 
     public MedicamentoEmUso(
@@ -169,9 +203,13 @@ public class MedicamentoEmUso {
         return active;
     }
 
-    // Preserva o ID e todas as versoes de cronograma.
     public void deactivate() {
+
+        // Uma segunda desativação não deve modificar o instante original.
+        if (!active) return;
+
         this.active = false;
+        this.deactivatedAt = Instant.ofEpochMilli(System.currentTimeMillis());
     }
 
     // Valida os dados do medicamento; o cronograma e validado no fluxo proprio.
@@ -304,6 +342,10 @@ public class MedicamentoEmUso {
         return updateSchedule(daysOfWeek, newTimes, newStartDate, endDate, timezone);
     }
 
+    public Instant getDeactivatedAt() {
+        return deactivatedAt;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -321,12 +363,13 @@ public class MedicamentoEmUso {
                 && active == that.active
                 && revision == that.revision
                 && Objects.equals(observations, that.observations)
-                && Objects.equals(schedules, that.schedules);
+                && Objects.equals(schedules, that.schedules)
+                && Objects.equals(deactivatedAt, that.deactivatedAt);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, dose, quantity, unit, active, revision, observations, schedules);
+        return Objects.hash(id, name, dose, quantity, unit, active, revision, observations, schedules, deactivatedAt);
     }
 
     @Override

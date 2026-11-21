@@ -488,7 +488,8 @@ public class Treatment {
                 medication.getObservations(),
                 medication.isActive(),
                 medication.getSchedules(),
-                medication.getRevision()
+                medication.getRevision(),
+                medication.getDeactivatedAt()
         );
     }
 
