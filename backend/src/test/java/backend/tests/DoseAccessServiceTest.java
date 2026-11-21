@@ -57,7 +57,8 @@ class DoseAccessServiceTest {
         service = new DoseAccessService(doses, records, Clock.fixed(now, ZoneOffset.UTC));
         doses.save(dose("dose-a", "user-a", ScheduleStatus.SCHEDULED));
         doses.save(dose("dose-b", "user-b", ScheduleStatus.SCHEDULED));
-        doses.save(dose("cancelled", "user-a", ScheduleStatus.CANCELLED));
+        var cancelled = doses.save(dose("cancelled", "user-a", ScheduleStatus.SCHEDULED));
+        doses.save(cancelled.cancel());
     }
 
     @AfterEach

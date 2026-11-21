@@ -312,7 +312,7 @@ public class AgendaDiariaTest {
                 new BigDecimal("1"),
                 ScheduleStatus.SCHEDULED));
 
-        plannedDoseRepository.save(new DosePrevista(
+        var cancelled = new DosePrevista(
                 "dose-cancelled-20h",
                 "user-a",
                 "treat-001",
@@ -322,7 +322,9 @@ public class AgendaDiariaTest {
                 Instant.parse("2026-11-05T23:00:00Z"),
                 TIMEZONE_SP,
                 new BigDecimal("1"),
-                ScheduleStatus.CANCELLED));
+                ScheduleStatus.SCHEDULED);
+        plannedDoseRepository.save(cancelled);
+        plannedDoseRepository.save(cancelled.cancel());
 
         HttpRequest request = new HttpRequest("GET", "/doses?date=2026-11-05", authHeader("token-user-a"));
         HttpResponse response = router.route(request);

@@ -423,11 +423,12 @@ public class DoseRecordIntegrationTest {
 
     @Test
     void doseCanceladaNaoAceitaNovoRegistro() {
-        planned.save(createDose(
+        var cancelled = planned.save(createDose(
                 "cancelled",
                 "user-a",
-                ScheduleStatus.CANCELLED
+                ScheduleStatus.SCHEDULED
         ));
+        planned.save(cancelled.cancel());
 
         try {
             service.recordDose(

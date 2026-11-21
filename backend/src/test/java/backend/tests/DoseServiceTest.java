@@ -380,6 +380,18 @@ public class DoseServiceTest {
         public int countAll() {
             return data.size();
         }
+
+        // Estes testes nao exercitam cancelamento; uma chamada inesperada deve falhar.
+        @Override
+        public long cancelScheduledForTreatmentFrom(String userId, String treatmentId, Instant start) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long cancelScheduledForMedicationVersionFrom(
+                String userId, String treatmentId, String medicationId, int version, Instant start) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static class MemoryRecordRepository

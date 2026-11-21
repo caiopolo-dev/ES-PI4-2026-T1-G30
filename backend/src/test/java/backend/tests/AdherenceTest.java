@@ -283,7 +283,8 @@ public class AdherenceTest {
     @DisplayName("Caso 6: 1 vencida TAKEN (atrasada) e 1 futura CANCELLED -> Execução 100% e Pontualidade 0%")
     void oneOverdueTakenLateAndOneCancelled() {
         plannedDoseRepository.save(createDose("d1", "user-a", "t1", "m1", 1, "2026-11-04T11:00:00Z", ScheduleStatus.SCHEDULED));
-        plannedDoseRepository.save(createDose("d2", "user-a", "t1", "m1", 1, "2026-11-04T23:00:00Z", ScheduleStatus.CANCELLED));
+        var future = plannedDoseRepository.save(createDose("d2", "user-a", "t1", "m1", 1, "2026-11-04T23:00:00Z", ScheduleStatus.SCHEDULED));
+        plannedDoseRepository.save(future.cancel());
         // Tomada 45 min após o previsto (fora da tolerância de 30 min, mas conta como TAKEN na execução)
         doseRecordRepository.save(createRecord("r1", "d1", "user-a", DoseAction.TAKEN, "2026-11-04T11:45:00Z"));
 
@@ -366,7 +367,8 @@ public class AdherenceTest {
         doseRecordRepository.save(createRecord("rv1", "v1-08h", "user-a", DoseAction.TAKEN, "2026-11-03T11:10:00Z"));
 
         // Versão 1 das 20:00 cancelada após alteração de cronograma para v2 às 21:00
-        plannedDoseRepository.save(createDose("v1-20h-cancel", "user-a", "t1", "m1", 1, "2026-11-03T23:00:00Z", ScheduleStatus.CANCELLED));
+        var replaced = plannedDoseRepository.save(createDose("v1-20h-cancel", "user-a", "t1", "m1", 1, "2026-11-03T23:00:00Z", ScheduleStatus.SCHEDULED));
+        plannedDoseRepository.save(replaced.cancel());
         plannedDoseRepository.save(createDose("v2-21h", "user-a", "t1", "m1", 2, "2026-11-04T00:00:00Z", ScheduleStatus.SCHEDULED));
         doseRecordRepository.save(createRecord("rv2", "v2-21h", "user-a", DoseAction.TAKEN, "2026-11-04T00:40:00Z"));
 

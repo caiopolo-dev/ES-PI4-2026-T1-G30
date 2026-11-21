@@ -426,7 +426,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 && Objects.equals(a.getEndDate(), b.getEndDate())
                 && Objects.equals(a.getTimezone(), b.getTimezone())
                 && Objects.equals(a.getValidFrom(), b.getValidFrom())
-                && Objects.equals(a.getValidTo(), b.getValidTo());
+                && Objects.equals(a.getValidTo(), b.getValidTo())
+                && Objects.equals(a.getQuantitySnapshot(), b.getQuantitySnapshot())
+                && Objects.equals(a.getUnitSnapshot(), b.getUnitSnapshot());
     }
 
     private void validateTreatmentDomain(Treatment treatment) {
@@ -623,7 +625,10 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 activeRaw == null || activeRaw,
                 parseInstant(schedDoc.get("validFrom")),
                 parseInstant(schedDoc.get("validTo")),
-                schedDoc.getInteger("quantitySnapshot"),
+                // Le documentos gravados pela branch antiga, mas novas gravacoes usam quantitySnapshot.
+                schedDoc.containsKey("quantitySnapshot")
+                        ? schedDoc.getInteger("quantitySnapshot")
+                        : schedDoc.getInteger("quantityPerAdministrationSnapshot"),
                 schedDoc.getString("unitSnapshot")
         );
     }
