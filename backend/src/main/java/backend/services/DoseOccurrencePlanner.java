@@ -41,23 +41,19 @@ public class DoseOccurrencePlanner {
                 continue;
             }
 
-            // Obtém a versão ativa do cronograma, caso exista.
-            Optional<CronogramaDose> cronogramaOpt = medicamento.getActiveSchedule();
+            // Percorre as versões do cronograma que podem gerar ocorrências.
+            // Uma versão inativa ainda pode possuir vigência futura.
+            for (CronogramaDose cronograma : obterCronogramasElegiveis(medicamento)) {
 
-            if (cronogramaOpt.isEmpty()) {
-                continue;
+                doses.addAll(gerarDosesMedicamento(
+                        treatment,
+                        medicamento,
+                        cronograma,
+                        startInclusive,
+                        endExclusive
+                ));
             }
 
-            CronogramaDose cronograma = cronogramaOpt.get();
-
-            // Cada medicamento possui sua própria regra e seu próprio fuso.
-            doses.addAll(gerarDosesMedicamento(
-                    treatment,
-                    medicamento,
-                    cronograma,
-                    startInclusive,
-                    endExclusive
-            ));
         }
 
         // Ordena as ocorrências pelo instante previsto.
@@ -78,6 +74,26 @@ public class DoseOccurrencePlanner {
             Instant endExclusive) {
 
         List<DosePrevista> doses = new ArrayList<>();
+
+
+        // Restringe o intervalo solicitado à vigência da versão do cronograma.
+        Instant validFrom = cronograma.getValidFrom();
+        Instant validTo = cronograma.getValidTo();
+
+        if (validFrom != null && validFrom.isAfter(startInclusive)) {
+            startInclusive = validFrom;
+        }
+
+        if (validTo != null && validTo.isBefore(endExclusive)) {
+            endExclusive = validTo;
+        }
+
+        // A versão do cronograma pode não possuir vigência
+        // dentro do intervalo solicitado.
+        if (!startInclusive.isBefore(endExclusive)) {
+            return doses;
+        }
+
 
         ZoneId fuso = ZoneId.of(cronograma.getTimezone());
         ZoneRules regrasFuso = fuso.getRules();
@@ -116,7 +132,7 @@ public class DoseOccurrencePlanner {
         Set<DayOfWeek> diasSemana = obterDiasSemana(cronograma);
         Set<LocalTime> horarios = obterHorarios(cronograma);
 
-        Integer quantidade = medicamento.getQuantity();
+        Integer quantidade = obterQuantidadePrevista(medicamento, cronograma);
 
         if (quantidade == null || quantidade <= 0) {
             throw new IllegalArgumentException("Quantidade do medicamento inválida");
@@ -181,26 +197,58 @@ public class DoseOccurrencePlanner {
         return doses;
     }
 
-    // Converte os dias informados no cronograma para DayOfWeek.
-    // null representa recorrência diária.
+
+    // Recupera a quantidade correspondente à versão
+    // do cronograma responsável pela ocorrência.
+    private Integer obterQuantidadePrevista(
+            MedicamentoEmUso medicamento,
+            CronogramaDose cronograma) {
+
+        // O snapshot possui prioridade sobre os dados atuais.
+        if (cronograma.hasPosologySnapshot()) {
+            return cronograma.getQuantitySnapshot();
+        }
+
+        // Compatibilidade com versões abertas sem snapshot.
+        if (cronograma.isActive()) {
+            return medicamento.getQuantity();
+        }
+
+        // Não utiliza a quantidade atual para reconstruir
+        // ocorrências de versões históricas desconhecidas.
+        throw new IllegalStateException(
+                "Não é possível determinar a quantidade da versão histórica "
+                        + cronograma.getVersion()
+        );
+    }
+
+
+    // Obtém os dias da semana de acordo com a frequência do cronograma.
+    // null representa uma recorrência diária, sem restrição de dias.
     private Set<DayOfWeek> obterDiasSemana(CronogramaDose cronograma) {
 
-        if (cronograma.getDaysOfWeek() == null) {
-            return null;
-        }
+        return switch (cronograma.getFrequency()) {
 
-        if (cronograma.getDaysOfWeek().isEmpty()) {
-            throw new IllegalArgumentException("A lista de dias da semana não pode ser vazia");
-        }
+            case EVERY_DAY -> null;
 
-        Set<DayOfWeek> dias = new HashSet<>();
+            case DAYS_OF_WEEK -> {
 
-        for (String dia : cronograma.getDaysOfWeek()) {
-            dias.add(DayOfWeek.valueOf(dia));
-        }
+                if (cronograma.getDaysOfWeek() == null
+                        || cronograma.getDaysOfWeek().isEmpty()) {
+                    throw new IllegalArgumentException("Cronograma semanal sem dias definidos");
+                }
 
-        return dias;
+                Set<DayOfWeek> dias = new HashSet<>();
+
+                for (String dia : cronograma.getDaysOfWeek()) {
+                    dias.add(DayOfWeek.valueOf(dia));
+                }
+
+                yield dias;
+            }
+        };
     }
+
 
     // Converte os horários do cronograma e evita repetições.
     private Set<LocalTime> obterHorarios(CronogramaDose cronograma) {
@@ -221,5 +269,94 @@ public class DoseOccurrencePlanner {
         }
 
         return horarios;
+    }
+
+
+    // Recupera as versões que possuem informações suficientes
+    // para determinar quando suas ocorrências devem ser geradas.
+    private List<CronogramaDose> obterCronogramasElegiveis(MedicamentoEmUso medicamento) {
+
+        List<CronogramaDose> cronogramas = medicamento.getSchedules();
+        List<CronogramaDose> elegiveis = new ArrayList<>();
+        Set<Integer> versoes = new HashSet<>();
+
+        int quantidadeAtivas = 0;
+
+        boolean possuiVigencia = false;
+        boolean possuiLegado = false;
+
+        for (CronogramaDose cronograma : cronogramas) {
+
+            // Cada versão deve possuir uma identidade única no histórico.
+            if (!versoes.add(cronograma.getVersion())) {
+                throw new IllegalStateException("Versão de cronograma duplicada");
+            }
+
+            if (cronograma.isActive()) {
+                quantidadeAtivas++;
+            }
+
+            if (cronograma.getValidFrom() == null) {
+                possuiLegado = true;
+            } else {
+                possuiVigencia = true;
+            }
+        }
+
+        if (quantidadeAtivas > 1) {
+            throw new IllegalStateException("Medicamento possui mais de um cronograma ativo");
+        }
+
+        // Não é possível determinar com segurança a vigência das versões
+        // quando o histórico mistura versões antigas e versionadas.
+        if (possuiLegado && possuiVigencia) {
+            throw new IllegalStateException("Histórico possui versões sem vigência definida");
+        }
+
+        // Mantém a compatibilidade com cronogramas antigos.
+        // Nesse caso, somente a versão ativa poderá gerar ocorrências.
+        if (!possuiVigencia) {
+
+            for (CronogramaDose cronograma : cronogramas) {
+
+                if (cronograma.isActive()) {
+                    elegiveis.add(cronograma);
+                }
+            }
+
+            return elegiveis;
+        }
+
+        // Cronogramas versionados são avaliados pela vigência,
+        // independentemente do valor do atributo active.
+        elegiveis.addAll(cronogramas);
+
+        elegiveis.sort(Comparator.comparing(CronogramaDose::getValidFrom));
+
+        // Verifica se existem versões com períodos de vigência sobrepostos.
+        for (int i = 0; i < elegiveis.size(); i++) {
+
+            CronogramaDose atual = elegiveis.get(i);
+
+            if (atual.isActive() && atual.getValidTo() != null) {
+                throw new IllegalStateException("Cronograma ativo possui término de vigência");
+            }
+
+            if (!atual.isActive() && atual.getValidTo() == null) {
+                throw new IllegalStateException("Cronograma inativo possui vigência aberta");
+            }
+
+            if (i + 1 < elegiveis.size()) {
+
+                CronogramaDose proximo = elegiveis.get(i + 1);
+
+                if (atual.getValidTo() == null
+                        || atual.getValidTo().isAfter(proximo.getValidFrom())) {
+                    throw new IllegalStateException("Cronogramas possuem vigências sobrepostas");
+                }
+            }
+        }
+
+        return elegiveis;
     }
 }

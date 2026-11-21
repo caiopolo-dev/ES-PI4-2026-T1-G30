@@ -6,6 +6,7 @@ import backend.services.DoseOccurrencePlanner;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.*;
 import java.util.List;
 
@@ -237,4 +238,105 @@ public class DoseOccurrencePlannerTest {
             );
         }
     }
+
+    @Test
+    void deveRespeitarVigenciaDeCadaVersao() {
+
+        Instant transicao = Instant.parse("2026-11-25T11:00:00Z");
+
+        // A versão anterior permanece vigente até o instante da transição.
+        CronogramaDose versao1 = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withValidity(
+                Instant.parse("2026-11-21T03:00:00Z"),
+                transicao
+        ).deactivate().withPosologySnapshot(1, "comprimido");
+
+        // A nova versão começa a valer exatamente no término da anterior.
+        CronogramaDose versao2 = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withVersion(2).withValidity(transicao, null)
+                .withPosologySnapshot(2, "comprimido");
+
+        MedicamentoEmUso medicamento = new MedicamentoEmUso(
+                "med-1",
+                "Medicamento de teste",
+                "50 mg",
+                1,
+                "comprimido",
+                null,
+                true,
+                List.of(versao1, versao2)
+        );
+
+        Treatment tratamento = new Treatment(
+                "trat-1",
+                "user-1",
+                "Tratamento de teste",
+                null,
+                LocalDate.of(2026, 11, 21),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
+                List.of(medicamento)
+        );
+
+        DoseOccurrencePlanner planner = new DoseOccurrencePlanner();
+
+        Instant inicio = Instant.parse("2026-11-24T03:00:00Z");
+        Instant fim = Instant.parse("2026-11-26T03:00:00Z");
+
+        List<DosePrevista> doses = planner.planOccurrences(tratamento, inicio, fim);
+
+        assertEquals(4, doses.size());
+
+        // As duas ocorrências do primeiro dia pertencem à versão anterior.
+        assertEquals(1, doses.get(0).getScheduleVersion());
+        assertEquals(1, doses.get(1).getScheduleVersion());
+
+        // A ocorrência exatamente na transição pertence à nova versão.
+        assertEquals(transicao, doses.get(2).getScheduledAt());
+        assertEquals(2, doses.get(2).getScheduleVersion());
+        assertEquals(2, doses.get(3).getScheduleVersion());
+
+        // Confirma que cada ocorrência preserva a quantidade
+        // correspondente à versão que originou sua geração.
+        assertEquals(BigDecimal.ONE, doses.get(0).getPlannedQuantity());
+        assertEquals(BigDecimal.ONE, doses.get(1).getPlannedQuantity());
+
+        assertEquals(BigDecimal.valueOf(2), doses.get(2).getPlannedQuantity());
+        assertEquals(BigDecimal.valueOf(2), doses.get(3).getPlannedQuantity());
+    }
+
+    @Test
+    void cronogramaNaoDeveGerarDosesAntesDaVigencia() {
+
+        CronogramaDose cronograma = new CronogramaDose(
+                List.of("08:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withValidity(
+                Instant.parse("2026-11-25T03:00:00Z"),
+                null
+        );
+
+        Treatment tratamento = criarTratamento(
+                cronograma, true, TreatmentStatus.ACTIVE
+        );
+
+        DoseOccurrencePlanner planner = new DoseOccurrencePlanner();
+
+        Instant inicio = Instant.parse("2026-11-21T03:00:00Z");
+        Instant fim = Instant.parse("2026-11-25T03:00:00Z");
+
+        List<DosePrevista> doses = planner.planOccurrences(tratamento, inicio, fim);
+
+        // Apesar de estar ativo, o cronograma ainda não entrou em vigência.
+        assertTrue(doses.isEmpty());
+    }
+
 }

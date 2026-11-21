@@ -263,6 +263,9 @@ public class TreatmentHandler implements HttpHandler {
                     .append("name", med.getName())
                     .append("dose", med.getDose())
                     .append("quantity", med.getQuantity())
+                    .append("unit", med.getUnit())
+                    .append("active", med.isActive())
+                    .append("revision", med.getRevision())
                     .append("observations", med.getObservations());
 
             java.util.List<Document> cronogramas = new java.util.ArrayList<>();

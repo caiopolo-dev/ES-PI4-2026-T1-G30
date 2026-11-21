@@ -4,6 +4,7 @@ package backend.tests;
 import backend.config.MongoConnection;
 import backend.models.CronogramaDose;
 import backend.models.MedicamentoEmUso;
+import backend.models.ScheduleFrequency;
 import backend.models.Treatment;
 import backend.models.TreatmentStatus;
 import backend.repositories.MongoTreatmentRepository;
@@ -497,4 +498,124 @@ public class TreatmentPersistenceTest {
         assertTrue(json.contains("\"status\": \"ACTIVE\"") || json.contains("\"status\":\"ACTIVE\""));
         assertTrue(json.contains("\"schedules\""));
     }
+
+    @Test
+    void devePersistirCronogramaVersionadoERecuperarEmNovoRepositorio() {
+        MedicamentoEmUso medication = new MedicamentoEmUso(
+                "med-schedule", "Medicamento", "1 comprimido", 1,
+                "comprimido", null, true, List.of(), 0L);
+        Treatment treatment = new Treatment(
+                "trat-schedule", "user-schedule", "Tratamento", null,
+                LocalDate.of(2026, 11, 1), LocalDate.of(2026, 12, 31),
+                TreatmentStatus.DRAFT, null, List.of(medication));
+        repository.save(treatment);
+
+        Instant firstStart = Instant.parse("2026-11-10T12:00:00.123456Z");
+        CronogramaDose first = new CronogramaDose(
+                1, ScheduleFrequency.EVERY_DAY, null, List.of("08:00"),
+                "2026-11-01", "2026-12-31", "America/Sao_Paulo", true,
+                firstStart, null);
+
+        assertTrue(repository.updateMedicationSchedules(
+                "trat-schedule", "user-schedule", "med-schedule", 0L, List.of(first)));
+        assertFalse(repository.updateMedicationSchedules(
+                "trat-schedule", "user-schedule", "med-schedule", 0L, List.of(first)));
+
+        MongoTreatmentRepository reopened = new MongoTreatmentRepository(connection.getDatabase());
+        MedicamentoEmUso recovered = reopened
+                .findByIdAndUserId("trat-schedule", "user-schedule")
+                .orElseThrow().findMedicationById("med-schedule").orElseThrow();
+
+        assertEquals(1L, recovered.getRevision());
+        assertEquals(1, recovered.getSchedules().size());
+        assertEquals(first, recovered.getSchedules().get(0));
+        assertEquals(firstStart, recovered.getSchedules().get(0).getValidFrom());
+        assertEquals(ScheduleFrequency.EVERY_DAY, recovered.getSchedules().get(0).getFrequency());
+    }
+
+    @Test
+    void updateGeralNaoDeveAceitarMedicamentoAnteriorAoCronogramaPersistido() {
+        MedicamentoEmUso medication = new MedicamentoEmUso(
+                "med-concurrency", "Medicamento", "1 comprimido", 1,
+                "comprimido", null, true, List.of(), 0L);
+        Treatment treatment = new Treatment(
+                "trat-concurrency", "user-concurrency", "Tratamento", null,
+                LocalDate.of(2026, 11, 1), LocalDate.of(2026, 12, 31),
+                TreatmentStatus.DRAFT, null, List.of(medication));
+        Treatment stale = repository.save(treatment);
+
+        CronogramaDose schedule = new CronogramaDose(
+                1, ScheduleFrequency.EVERY_DAY, null, List.of("08:00"),
+                "2026-11-01", "2026-12-31", "America/Sao_Paulo", true,
+                Instant.parse("2026-11-10T12:00:00Z"), null);
+        assertTrue(repository.updateMedicationSchedules(
+                "trat-concurrency", "user-concurrency", "med-concurrency", 0L,
+                List.of(schedule)));
+
+        assertThrows(IllegalStateException.class, () -> repository.update(stale));
+        MedicamentoEmUso recovered = repository.findById("trat-concurrency")
+                .orElseThrow().findMedicationById("med-concurrency").orElseThrow();
+        assertEquals(1L, recovered.getRevision());
+        assertEquals(List.of(schedule), recovered.getSchedules());
+
+        recovered.updateScheduleTimes(List.of("09:00"), "2026-11-20");
+        Treatment invalidGeneralUpdate = new Treatment(
+                "trat-concurrency", "user-concurrency", "Tratamento alterado", null,
+                LocalDate.of(2026, 11, 1), LocalDate.of(2026, 12, 31),
+                TreatmentStatus.DRAFT, null, List.of(recovered));
+        assertThrows(IllegalStateException.class,
+                () -> repository.update(invalidGeneralUpdate));
+
+        MedicamentoEmUso unchanged = repository.findById("trat-concurrency")
+                .orElseThrow().findMedicationById("med-concurrency").orElseThrow();
+        assertEquals(1, unchanged.getSchedules().size());
+        assertEquals(List.of(schedule), unchanged.getSchedules());
+    }
+
+
+    @Test
+    void devePersistirSnapshotDaPosologia() {
+
+        CronogramaDose cronograma = new CronogramaDose(
+                List.of("08:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withPosologySnapshot(2, "comprimido");
+
+        MedicamentoEmUso medicamento = new MedicamentoEmUso(
+                "med-1",
+                "Medicamento de teste",
+                "50 mg",
+                2,
+                "comprimido",
+                null,
+                true,
+                List.of(cronograma)
+        );
+
+        Treatment tratamento = new Treatment(
+                "user-1",
+                "Tratamento de teste",
+                null,
+                LocalDate.of(2026, 11, 21),
+                null
+        );
+
+        tratamento.addMedication(medicamento);
+
+        repository.save(tratamento);
+
+        // Recupera o tratamento persistido no MongoDB.
+        Treatment recuperado = repository.findById(tratamento.getId())
+                .orElseThrow();
+
+        CronogramaDose cronogramaRecuperado = recuperado
+                .findMedicationById("med-1").orElseThrow()
+                .getActiveSchedule().orElseThrow();
+
+        assertTrue(cronogramaRecuperado.hasPosologySnapshot());
+        assertEquals(Integer.valueOf(2), cronogramaRecuperado.getQuantitySnapshot());
+        assertEquals("comprimido", cronogramaRecuperado.getUnitSnapshot());
+    }
+
 }

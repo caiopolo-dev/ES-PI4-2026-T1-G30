@@ -3,6 +3,7 @@ package backend.repositories;
 
 import backend.models.CronogramaDose;
 import backend.models.MedicamentoEmUso;
+import backend.models.ScheduleFrequency;
 import backend.models.Treatment;
 import backend.models.TreatmentStatus;
 
@@ -11,9 +12,11 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Updates;
 import com.mongodb.client.result.UpdateResult;
 
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.Decimal128;
 
 import java.time.Instant;
@@ -190,16 +193,80 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         UpdateResult updateResult = collection.replaceOne(
                 Filters.and(
                         Filters.eq("_id", id),
-                        Filters.eq("userId", existingTreatment.getUserId())
+                        Filters.eq("userId", existingTreatment.getUserId()),
+                        Filters.ne("status", TreatmentStatus.CLOSED.name()),
+                        // issue 28 - Impede o replace de apagar uma atualização concorrente de cronograma.
+                        Filters.eq("medications", existingDoc.get("medications"))
                 ),
                 updatedDoc
         );
 
         if (updateResult.getMatchedCount() == 0) {
+            // issue 28 - Diferencia concorrência de remoção sem alterar o contrato de recurso ausente.
+            Document current = collection.find(Filters.and(
+                    Filters.eq("_id", id),
+                    Filters.eq("userId", existingTreatment.getUserId())
+            )).first();
+            if (current != null) {
+                throw new IllegalStateException("Tratamento alterado durante a atualização");
+            }
             throw new NoSuchElementException("Tratamento não encontrado para atualização: " + id);
         }
 
         return fromDocument(updatedDoc);
+    }
+
+    @Override
+    // issue 28 - Encerra a versão anterior e grava a nova no mesmo comando MongoDB.
+    public boolean updateMedicationSchedules(
+            String treatmentId,
+            String userId,
+            String medicationId,
+            long expectedRevision,
+            List<CronogramaDose> schedules) {
+
+        if (treatmentId == null || treatmentId.isBlank()
+                || userId == null || userId.isBlank()
+                || medicationId == null || medicationId.isBlank()) {
+            throw new IllegalArgumentException("Tratamento, titular e medicamento são obrigatórios");
+        }
+        if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) {
+            throw new IllegalArgumentException("Revisão inválida");
+        }
+        Objects.requireNonNull(schedules, "schedules não pode ser null");
+
+        List<Document> scheduleDocs = new ArrayList<>();
+        for (CronogramaDose schedule : schedules) {
+            scheduleDocs.add(toScheduleDocument(
+                    Objects.requireNonNull(schedule, "cronograma não pode ser null")));
+        }
+
+        Bson revisionFilter = expectedRevision == 0
+                ? Filters.or(Filters.exists("revision", false), Filters.eq("revision", 0L))
+                : Filters.eq("revision", expectedRevision);
+
+        Bson medicationFilter = Filters.and(
+                Filters.eq("id", medicationId.trim()),
+                Filters.ne("active", false),
+                revisionFilter
+        );
+
+        Bson filter = Filters.and(
+                Filters.eq("_id", treatmentId.trim()),
+                Filters.eq("userId", userId.trim()),
+                Filters.ne("status", TreatmentStatus.CLOSED.name()),
+                Filters.elemMatch("medications", medicationFilter)
+        );
+
+        UpdateResult result = collection.updateOne(
+                filter,
+                Updates.combine(
+                        Updates.set("medications.$.schedules", scheduleDocs),
+                        Updates.inc("medications.$.revision", 1L)
+                )
+        );
+
+        return result.getMatchedCount() == 1;
     }
 
     /**
@@ -219,6 +286,10 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 mergedMedications.add(incomingMed);
             } else {
                 MedicamentoEmUso existingMed = existingMedOpt.get();
+                // issue 28 - Rejeita uma cópia anterior à revisão gravada pelo fluxo de cronogramas.
+                if (incomingMed.getRevision() != existingMed.getRevision()) {
+                    throw new IllegalStateException("Medicamento alterado durante a atualização");
+                }
                 List<CronogramaDose> mergedSchedules = mergeSchedules(
                         existingMed.getSchedules(),
                         incomingMed.getSchedules()
@@ -234,6 +305,14 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         mergedSchedules,
                         incomingMed.getRevision()
                 ));
+            }
+        }
+
+        // issue 28 - A atualização geral não pode apagar um medicamento com histórico omitido.
+        for (MedicamentoEmUso existingMed : existingTreatment.getMedications()) {
+            if (!existingMed.getSchedules().isEmpty()
+                    && incomingTreatment.findMedicationById(existingMed.getId()).isEmpty()) {
+                mergedMedications.add(existingMed);
             }
         }
 
@@ -257,6 +336,16 @@ public class MongoTreatmentRepository implements TreatmentRepository {
     private List<CronogramaDose> mergeSchedules(
             List<CronogramaDose> existingSchedules,
             List<CronogramaDose> incomingSchedules) {
+        // issue 28 - Históricos com vigência só podem mudar pelo fluxo atômico de cronogramas.
+        if (hasControlledValidity(existingSchedules)
+                || hasControlledValidity(incomingSchedules)) {
+            if (incomingSchedules.isEmpty() || existingSchedules.equals(incomingSchedules)) {
+                return existingSchedules;
+            }
+            throw new IllegalStateException(
+                    "Cronogramas com vigência devem ser alterados pelo serviço de cronogramas");
+        }
+
         if (existingSchedules.isEmpty()) {
             return incomingSchedules;
         }
@@ -302,6 +391,16 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         return history;
     }
 
+    // issue 28 - Distingue versões modernas dos documentos legados sem vigência conhecida.
+    private boolean hasControlledValidity(List<CronogramaDose> schedules) {
+        for (CronogramaDose schedule : schedules) {
+            if (schedule.getValidFrom() != null || schedule.getValidTo() != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private int findMatchingVersionAndDefinition(
             List<CronogramaDose> history,
             CronogramaDose candidate) {
@@ -316,11 +415,15 @@ public class MongoTreatmentRepository implements TreatmentRepository {
     }
 
     private boolean sameScheduleDefinition(CronogramaDose a, CronogramaDose b) {
-        return Objects.equals(a.getDaysOfWeek(), b.getDaysOfWeek())
+        // issue 28 - A comparação inclui frequência e vigência para não ocultar uma alteração real.
+        return a.getFrequency() == b.getFrequency()
+                && Objects.equals(a.getDaysOfWeek(), b.getDaysOfWeek())
                 && Objects.equals(a.getTimes(), b.getTimes())
                 && Objects.equals(a.getStartDate(), b.getStartDate())
                 && Objects.equals(a.getEndDate(), b.getEndDate())
-                && Objects.equals(a.getTimezone(), b.getTimezone());
+                && Objects.equals(a.getTimezone(), b.getTimezone())
+                && Objects.equals(a.getValidFrom(), b.getValidFrom())
+                && Objects.equals(a.getValidTo(), b.getValidTo());
     }
 
     private void validateTreatmentDomain(Treatment treatment) {
@@ -366,18 +469,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
 
             // Serializa todas as versões dos cronogramas.
             for (CronogramaDose schedule : med.getSchedules()) {
-                Document schedDoc = new Document()
-                        .append("version", schedule.getVersion())
-                        .append("daysOfWeek", schedule.getDaysOfWeek() != null
-                                ? new ArrayList<>(schedule.getDaysOfWeek())
-                                : null)
-                        .append("times", new ArrayList<>(schedule.getTimes()))
-                        .append("startDate", schedule.getStartDate())
-                        .append("endDate", schedule.getEndDate())
-                        .append("timezone", schedule.getTimezone())
-                        .append("active", schedule.isActive());
-
-                scheduleDocs.add(schedDoc);
+                // issue 28 - Preserva frequência e vigência no documento embutido.
+                scheduleDocs.add(toScheduleDocument(schedule));
             }
 
             // Preserva os campos das duas branches.
@@ -436,28 +529,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         if (schedDoc == null) {
                             continue;
                         }
-                        Object versionRaw = schedDoc.get("version");
-                        if (!(versionRaw instanceof Number)) {
-                            throw new IllegalArgumentException("Versão do cronograma inválida no documento MongoDB");
-                        }
-                        int version = ((Number) versionRaw).intValue();
-                        List<String> daysOfWeek = schedDoc.getList("daysOfWeek", String.class);
-                        List<String> times = schedDoc.getList("times", String.class);
-                        String schedStartDate = schedDoc.getString("startDate");
-                        String schedEndDate = schedDoc.getString("endDate");
-                        String timezone = schedDoc.getString("timezone");
-                        Boolean schedActiveRaw = schedDoc.getBoolean("active");
-                        boolean schedActive = schedActiveRaw != null ? schedActiveRaw : true;
-
-                        schedules.add(new CronogramaDose(
-                                version,
-                                daysOfWeek != null ? new ArrayList<>(daysOfWeek) : null,
-                                times != null ? new ArrayList<>(times) : Collections.emptyList(),
-                                schedStartDate,
-                                schedEndDate,
-                                timezone,
-                                schedActive
-                        ));
+                        // issue 28 - Reconstrói inclusive versões legadas pelo mapeador compatível.
+                        schedules.add(fromScheduleDocument(schedDoc));
                     }
                 }
 
@@ -495,6 +568,73 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         return toDocument(treatment).toJson();
     }
 
+    // issue 28 - Centraliza o formato BSON de todas as versões do cronograma.
+    static Document toScheduleDocument(CronogramaDose schedule) {
+        return new Document()
+                .append("version", schedule.getVersion())
+                .append("frequency", schedule.getFrequency().name())
+                .append("daysOfWeek", schedule.getDaysOfWeek() != null
+                        ? new ArrayList<>(schedule.getDaysOfWeek())
+                        : null)
+                .append("times", new ArrayList<>(schedule.getTimes()))
+                .append("startDate", schedule.getStartDate())
+                .append("endDate", schedule.getEndDate())
+                .append("timezone", schedule.getTimezone())
+                .append("active", schedule.isActive())
+                .append("validFrom", schedule.getValidFrom() != null
+                        ? schedule.getValidFrom().toString()
+                        : null)
+                .append("validTo", schedule.getValidTo() != null
+                        ? schedule.getValidTo().toString()
+                        : null)
+                .append("quantitySnapshot", schedule.getQuantitySnapshot())
+                .append("unitSnapshot", schedule.getUnitSnapshot());
+    }
+
+    // issue 28 - Reconstrói uma versão atual ou legada sem inventar instantes históricos.
+    static CronogramaDose fromScheduleDocument(Document schedDoc) {
+        Objects.requireNonNull(schedDoc, "documento de cronograma não pode ser null");
+        Object versionRaw = schedDoc.get("version");
+        if (!(versionRaw instanceof Number)) {
+            throw new IllegalArgumentException("Versão do cronograma inválida no documento MongoDB");
+        }
+
+        List<String> daysOfWeek = schedDoc.getList("daysOfWeek", String.class);
+        List<String> times = schedDoc.getList("times", String.class);
+        ScheduleFrequency frequency = parseScheduleFrequency(
+                schedDoc.getString("frequency"), daysOfWeek);
+        Boolean activeRaw = schedDoc.getBoolean("active");
+
+        return new CronogramaDose(
+                ((Number) versionRaw).intValue(),
+                frequency,
+                daysOfWeek != null ? new ArrayList<>(daysOfWeek) : null,
+                times != null ? new ArrayList<>(times) : Collections.emptyList(),
+                schedDoc.getString("startDate"),
+                schedDoc.getString("endDate"),
+                schedDoc.getString("timezone"),
+                activeRaw == null || activeRaw,
+                parseInstant(schedDoc.get("validFrom")),
+                parseInstant(schedDoc.get("validTo")),
+                schedDoc.getInteger("quantitySnapshot"),
+                schedDoc.getString("unitSnapshot")
+        );
+    }
+
+    // issue 28 - Mantém compatibilidade com documentos anteriores ao campo frequency.
+    private static ScheduleFrequency parseScheduleFrequency(String value, List<String> daysOfWeek) {
+        if (value == null || value.isBlank()) {
+            return daysOfWeek == null || daysOfWeek.isEmpty()
+                    ? ScheduleFrequency.EVERY_DAY
+                    : ScheduleFrequency.DAYS_OF_WEEK;
+        }
+        try {
+            return ScheduleFrequency.valueOf(value.trim());
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("Frequência inválida no documento MongoDB", error);
+        }
+    }
+
     private TreatmentStatus parseStatus(Document doc) {
         String statusRaw = doc.getString("status");
         if (statusRaw != null && !statusRaw.isBlank()) {
@@ -517,7 +657,7 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         throw new IllegalArgumentException("Formato de data inválido no documento MongoDB");
     }
 
-    private Instant parseInstant(Object value) {
+    private static Instant parseInstant(Object value) {
         if (value == null) {
             return null;
         }

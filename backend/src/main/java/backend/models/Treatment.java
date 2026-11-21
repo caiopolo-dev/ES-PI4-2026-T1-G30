@@ -213,6 +213,16 @@ public class Treatment {
             if (!antigo.isActive() && novo.isActive()) {
                 throw new IllegalArgumentException("Não é permitido reativar uma versão histórica");
             }
+
+            // Impede que um snapshot já registrado seja alterado ou removido.
+            if (antigo.hasPosologySnapshot()
+                    && (!Objects.equals(antigo.getQuantitySnapshot(), novo.getQuantitySnapshot())
+                    || !Objects.equals(antigo.getUnitSnapshot(), novo.getUnitSnapshot()))) {
+
+                throw new IllegalArgumentException(
+                        "Não é permitido alterar a posologia de uma versão existente"
+                );
+            }
         }
     }
 

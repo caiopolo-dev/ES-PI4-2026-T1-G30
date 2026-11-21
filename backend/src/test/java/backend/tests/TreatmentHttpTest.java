@@ -27,6 +27,39 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 public class TreatmentHttpTest {
 
+    @Test
+    void consultaPreservaCamposEInformaUnidadeSituacaoERevisao() {
+        String id = criarRascunho();
+        Treatment treatment = repository.findById(id).orElseThrow();
+        var schedule = new CronogramaDose(List.of("08:00"), "2026-11-19", "America/Sao_Paulo");
+        treatment.addMedication(new MedicamentoEmUso("med-active", "Demo", "50 mg", 1,
+                "comprimido", "Observacao", true, List.of(schedule), 3));
+        treatment.addMedication(new MedicamentoEmUso("med-inactive", "Outro", "10 mg", 2,
+                "mL", null, false, List.of(), 5));
+        repository.update(treatment);
+
+        HttpResponse response = requisitar("GET", "/treatments/" + id, null);
+        assertEquals(200, response.getStatusCode());
+        var medications = Document.parse(response.getBody()).getList("medications", Document.class);
+        assertEquals(2, medications.size());
+        Document active = medications.stream().filter(m -> "med-active".equals(m.getString("id"))).findFirst().orElseThrow();
+        assertEquals("comprimido", active.getString("unit"));
+        assertTrue(active.getBoolean("active"));
+        assertEquals(3L, ((Number) active.get("revision")).longValue());
+        // Os campos existentes e os cronogramas continuam disponiveis.
+        assertEquals("Demo", active.getString("name"));
+        assertEquals("50 mg", active.getString("dose"));
+        assertEquals(1, active.getInteger("quantity"));
+        assertEquals("Observacao", active.getString("observations"));
+        assertEquals(List.of("08:00"), active.getList("schedules", Document.class).get(0).getList("times", String.class));
+        Document inactive = medications.stream().filter(m -> "med-inactive".equals(m.getString("id"))).findFirst().orElseThrow();
+        assertEquals("mL", inactive.getString("unit"));
+        assertFalse(inactive.getBoolean("active"));
+        assertEquals(5L, ((Number) inactive.get("revision")).longValue());
+        usuarioAutenticado = "usuario-B";
+        assertEquals(404, requisitar("GET", "/treatments/" + id, null).getStatusCode());
+    }
+
     private String mongoUri;
     private String databaseName;
     private MongoConnection connection;

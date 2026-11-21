@@ -195,4 +195,101 @@ public class DoseGenerationServiceTest {
 
         verifyNoInteractions(plannedDoseRepository);
     }
+
+
+    @Test
+    void deveCancelarVersaoObsoletaEGerarOcorrenciasValidas() {
+
+        Instant transicao = Instant.parse("2026-11-25T11:00:00Z");
+
+        CronogramaDose versao1 = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withValidity(
+                Instant.parse("2026-11-21T03:00:00Z"),
+                transicao
+        ).deactivate().withPosologySnapshot(1, "comprimido");
+
+        CronogramaDose versao2 = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withVersion(2)
+                .withValidity(transicao, null)
+                .withPosologySnapshot(2, "comprimido");
+
+        MedicamentoEmUso medicamento = new MedicamentoEmUso(
+                "med-1",
+                "Medicamento de teste",
+                "50 mg",
+                2,
+                "comprimido",
+                null,
+                true,
+                List.of(versao1, versao2)
+        );
+
+        Treatment tratamento = new Treatment(
+                "trat-1",
+                "user-1",
+                "Tratamento de teste",
+                null,
+                LocalDate.of(2026, 11, 21),
+                null,
+                TreatmentStatus.ACTIVE,
+                null,
+                List.of(medicamento)
+        );
+
+        when(treatmentRepository.findByIdAndUserId("trat-1", "user-1"))
+                .thenReturn(Optional.of(tratamento));
+
+        when(plannedDoseRepository.saveAll(anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<DosePrevista> doses = service.reconcile("user-1", "trat-1");
+
+        // Confirma a ordem das operações:
+        // primeiro cancela as doses obsoletas e depois gera as válidas.
+        var ordem = inOrder(plannedDoseRepository);
+
+        ordem.verify(plannedDoseRepository)
+                .cancelScheduledForMedicationVersionFrom(
+                        "user-1", "trat-1", "med-1", 1, transicao
+                );
+
+        ordem.verify(plannedDoseRepository).saveAll(anyList());
+
+        assertEquals(59, doses.size());
+
+        for (DosePrevista dose : doses) {
+
+            if (dose.getScheduledAt().isBefore(transicao)) {
+                assertEquals(1, dose.getScheduleVersion());
+            } else {
+                assertEquals(2, dose.getScheduleVersion());
+            }
+        }
+    }
+
+    @Test
+    void reconciliacaoDeTratamentoEncerradoNaoDeveGerarDoses() {
+
+        Treatment tratamento = criarTratamento(TreatmentStatus.CLOSED);
+
+        when(treatmentRepository.findByIdAndUserId("trat-1", "user-1"))
+                .thenReturn(Optional.of(tratamento));
+
+        List<DosePrevista> doses = service.reconcile("user-1", "trat-1");
+
+        assertTrue(doses.isEmpty());
+
+        verify(plannedDoseRepository).cancelScheduledForTreatmentFrom(
+                "user-1", "trat-1", tratamento.getClosedAt()
+        );
+
+        verify(plannedDoseRepository, never()).saveAll(anyList());
+    }
+
 }

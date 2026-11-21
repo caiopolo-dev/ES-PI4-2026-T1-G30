@@ -12,9 +12,18 @@ import java.time.*;
 import java.util.List;
 import java.util.Objects;
 
+import backend.models.CronogramaDose;
+import backend.models.MedicamentoEmUso;
+
 // Responsável por coordenar a geração e persistência das doses previstas.
 // Utiliza o DoseOccurrencePlanner para calcular as ocorrências
 // e o PlannedDoseRepository para armazená-las de forma idempotente.
+
+// Envolvemos todo o corpo do método com synchronized para garantir
+// que nenhuma outra operação protegida altere o tratamento entre
+// sua leitura, processamento e persistência.
+// Ao finalizar o bloco, a thread libera automaticamente o monitor,
+// permitindo que outra thread prossiga com sua execução.
 
 public class DoseGenerationService {
 
@@ -51,20 +60,23 @@ public class DoseGenerationService {
             String treatmentId,
             Instant startInclusive,
             Instant endExclusive) {
+        // synchronized permite que apenas uma thread por vez execute
+        // um bloco de código protegido pelo mesmo monitor.
+        synchronized (TreatmentMutationLock.MONITOR) {
+            if (startInclusive == null || endExclusive == null
+                    || !startInclusive.isBefore(endExclusive)) {
+                throw new IllegalArgumentException("Intervalo de geração inválido");
+            }
 
-        if (startInclusive == null || endExclusive == null
-                || !startInclusive.isBefore(endExclusive)) {
-            throw new IllegalArgumentException("Intervalo de geração inválido");
+            // Uma regra atual não deve ser utilizada para reconstruir doses passadas.
+            if (startInclusive.isBefore(clock.instant())) {
+                throw new IllegalArgumentException("Não é permitido gerar doses retroativamente");
+            }
+
+            Treatment treatment = buscarTratamento(userId, treatmentId);
+
+            return gerarEPersistir(treatment, startInclusive, endExclusive);
         }
-
-        // Uma regra atual não deve ser utilizada para reconstruir doses passadas.
-        if (startInclusive.isBefore(clock.instant())) {
-            throw new IllegalArgumentException("Não é permitido gerar doses retroativamente");
-        }
-
-        Treatment treatment = buscarTratamento(userId, treatmentId);
-
-        return gerarEPersistir(treatment, startInclusive, endExclusive);
     }
 
     // Gera as ocorrências restantes do dia atual
@@ -73,17 +85,19 @@ public class DoseGenerationService {
             String userId,
             String treatmentId) {
 
-        Instant agora = clock.instant();
+        synchronized (TreatmentMutationLock.MONITOR) {
+            Instant agora = clock.instant();
 
-        LocalDate hoje = agora.atZone(REFERENCE_ZONE).toLocalDate();
+            LocalDate hoje = agora.atZone(REFERENCE_ZONE).toLocalDate();
 
-        // Obtém o início do dia seguinte à janela de geração.
-        Instant fim = hoje.plusDays(WINDOW_DAYS)
-                .atStartOfDay(REFERENCE_ZONE).toInstant();
+            // Obtém o início do dia seguinte à janela de geração.
+            Instant fim = hoje.plusDays(WINDOW_DAYS)
+                    .atStartOfDay(REFERENCE_ZONE).toInstant();
 
-        Treatment treatment = buscarTratamento(userId, treatmentId);
+            Treatment treatment = buscarTratamento(userId, treatmentId);
 
-        return gerarEPersistir(treatment, agora, fim);
+            return gerarEPersistir(treatment, agora, fim);
+        }
     }
 
     // Cancela as ocorrências futuras de um tratamento encerrado,
@@ -91,20 +105,23 @@ public class DoseGenerationService {
     public long cancelFutureForClosedTreatment(
             String userId,
             String treatmentId) {
+        // synchronized permite que apenas uma thread por vez execute
+        // um bloco de código protegido pelo mesmo monitor.
+        synchronized (TreatmentMutationLock.MONITOR) {
+            Treatment treatment = buscarTratamento(userId, treatmentId);
 
-        Treatment treatment = buscarTratamento(userId, treatmentId);
+            if (treatment.getStatus() != TreatmentStatus.CLOSED) {
+                throw new IllegalStateException("O tratamento precisa estar encerrado");
+            }
 
-        if (treatment.getStatus() != TreatmentStatus.CLOSED) {
-            throw new IllegalStateException("O tratamento precisa estar encerrado");
+            // Utiliza o instante original de encerramento,
+            // mesmo quando o cancelamento é executado novamente.
+            return plannedDoseRepository.cancelScheduledForTreatmentFrom(
+                    treatment.getUserId(),
+                    treatment.getId(),
+                    treatment.getClosedAt()
+            );
         }
-
-        // Utiliza o instante original de encerramento,
-        // mesmo quando o cancelamento é executado novamente.
-        return plannedDoseRepository.cancelScheduledForTreatmentFrom(
-                treatment.getUserId(),
-                treatment.getId(),
-                treatment.getClosedAt()
-        );
     }
 
     // Recupera o tratamento verificando sua titularidade.
@@ -135,4 +152,56 @@ public class DoseGenerationService {
         // Retorna as ocorrências efetivamente armazenadas no banco.
         return plannedDoseRepository.saveAll(doses);
     }
+
+
+    // Reconcilia as doses previstas com o estado atual do tratamento.
+// Pode ser executado novamente sem duplicar ocorrências.
+    public List<DosePrevista> reconcile(String userId, String treatmentId) {
+        // synchronized permite que apenas uma thread por vez execute
+        // um bloco de código protegido pelo mesmo monitor.
+        synchronized (TreatmentMutationLock.MONITOR) {
+
+            Treatment treatment = buscarTratamento(userId, treatmentId);
+
+            // Tratamentos encerrados não devem possuir doses
+            // agendadas a partir do instante de encerramento.
+            if (treatment.getStatus() == TreatmentStatus.CLOSED) {
+
+                plannedDoseRepository.cancelScheduledForTreatmentFrom(
+                        userId, treatmentId, treatment.getClosedAt()
+                );
+
+                return List.of();
+            }
+
+            // Tratamentos em rascunho não geram doses.
+            if (treatment.getStatus() != TreatmentStatus.ACTIVE) {
+                return List.of();
+            }
+
+            // Identifica versões que possuem término de vigência.
+            for (MedicamentoEmUso medicamento : treatment.getMedications()) {
+
+                for (CronogramaDose cronograma : medicamento.getSchedules()) {
+
+                    if (cronograma.getValidTo() != null) {
+
+                        // Cancela somente as ocorrências posteriores
+                        // ou iguais ao término da vigência da versão.
+                        plannedDoseRepository.cancelScheduledForMedicationVersionFrom(
+                                userId,
+                                treatmentId,
+                                medicamento.getId(),
+                                cronograma.getVersion(),
+                                cronograma.getValidTo()
+                        );
+                    }
+                }
+            }
+
+            // Completa a janela móvel utilizando as versões válidas.
+            return refreshRollingWindow(userId, treatmentId);
+        }
+    }
+
 }

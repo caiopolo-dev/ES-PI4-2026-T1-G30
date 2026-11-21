@@ -12,6 +12,84 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MedicationInUseServiceTest {
+    @Test
+    void preparesQuantityChangeThroughScheduleServiceWithoutWriting() {
+        var repository = new TestRepository();
+        var schedules = org.mockito.Mockito.mock(backend.services.ScheduleService.class);
+        var effective = java.time.Instant.now().plusSeconds(86400);
+        var previousSchedule = new CronogramaDose(List.of("08:00"), "2026-11-19", "UTC")
+            .withValidity(effective.minusSeconds(172800), null);
+        repository.add("t", "a", new MedicamentoEmUso("m", "Demo", "50 mg", 1,
+            "comprimido", null, true, List.of(previousSchedule)));
+        var history = List.of(previousSchedule.withActive(false).withValidity(previousSchedule.getValidFrom(), effective),
+            previousSchedule.withVersion(2).withValidity(effective, null));
+        org.mockito.Mockito.when(schedules.prepararTransicao(a, "t", "m", previousSchedule, effective)).thenReturn(history);
+        var service = new MedicationInUseService(repository, new TestRules(), schedules);
+        int writes = repository.writes;
+        var prepared = service.prepareVersionedUpdate(a, "t", "m", "Demo", "50 mg", 2, "mL", null, 0, effective);
+        assertEquals(1, prepared.previous().getQuantity());
+        assertEquals("comprimido", prepared.previous().getUnit());
+        assertEquals(2, prepared.updated().getQuantity());
+        assertEquals("mL", prepared.updated().getUnit());
+        assertEquals(List.of(
+                history.get(0).withPosologySnapshot(1, "comprimido"),
+                history.get(1).withPosologySnapshot(2, "mL")
+        ), prepared.updated().getSchedules());
+        assertEquals(0L, prepared.updated().getRevision());
+        assertEquals(effective, prepared.validFrom());
+        assertEquals(List.of(previousSchedule), service.find(a, "t", "m").getSchedules());
+        assertEquals(1, service.find(a, "t", "m").getQuantity());
+        assertEquals(writes, repository.writes);
+        org.mockito.Mockito.verify(schedules).prepararTransicao(a, "t", "m", previousSchedule, effective);
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> service.prepareVersionedUpdate(a, "t", "m", "Demo", "50 mg", 2, "mL", null, 1, effective));
+        assertThrows(ResourceNotFoundException.class,
+            () -> service.prepareVersionedUpdate(b, "t", "m", "Demo", "50 mg", 2, "mL", null, 0, effective));
+        assertThrows(IllegalArgumentException.class,
+            () -> service.prepareVersionedUpdate(a, "t", "m", "Demo", "50 mg", 2, "mL", null, 0,
+                java.time.Instant.now().minusSeconds(60)));
+        assertEquals(writes, repository.writes);
+    }
+
+    @Test
+    void treatmentRulesUseRealIdentityAndStates() {
+        var repository = org.mockito.Mockito.mock(backend.repositories.TreatmentRepository.class);
+        var owner = new AuthContext("owner");
+        var rules = new backend.services.DefaultTreatmentMedicationRules(
+            new backend.services.TreatmentService(repository));
+        var schedule = new CronogramaDose(List.of("08:00"), "2026-11-19", "America/Sao_Paulo");
+        var medication = new MedicamentoEmUso("m", "Demo", "50 mg", 1, "mL", null, true, List.of(schedule));
+        var incomplete = new MedicamentoEmUso("new", "Demo", "50 mg", null, null, null, true, List.of());
+        var draft = new backend.models.Treatment("t", "owner", "Demo", null,
+            java.time.LocalDate.parse("2026-11-19"), null, backend.models.TreatmentStatus.DRAFT, null, List.of(medication));
+        org.mockito.Mockito.when(repository.findByIdAndUserId("t", "owner")).thenReturn(Optional.of(draft));
+        org.mockito.Mockito.when(repository.findByIdAndUserId("t", "other")).thenReturn(Optional.empty());
+        assertDoesNotThrow(() -> rules.validateAddition(owner, "t", incomplete));
+        assertDoesNotThrow(() -> rules.validateDeactivation(owner, "t", medication));
+        assertEquals(0, rules.minimumRemainingActiveMedications(owner, "t"));
+        assertThrows(ResourceNotFoundException.class,
+            () -> rules.validateAddition(new AuthContext("other"), "t", medication));
+        draft.activate();
+        assertDoesNotThrow(() -> rules.validateUpdate(owner, "t", medication));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateAddition(owner, "t", incomplete));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateUpdate(owner, "t", incomplete));
+        assertEquals(1, rules.minimumRemainingActiveMedications(owner, "t"));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateDeactivation(owner, "t", medication));
+        var other = new MedicamentoEmUso("other", "Demo", "50 mg", 1, "mL", null, true, List.of(schedule));
+        draft.addMedication(other);
+        assertDoesNotThrow(() -> rules.validateDeactivation(owner, "t", medication));
+        draft.close(java.time.Instant.now());
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateAddition(owner, "t", medication));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateUpdate(owner, "t", medication));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateDeactivation(owner, "t", medication));
+    }
+
     private final AuthContext a = new AuthContext("a");
     private final AuthContext b = new AuthContext("b");
 
