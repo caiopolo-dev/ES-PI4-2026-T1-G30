@@ -23,6 +23,8 @@ public final class MedicationInUseService {
         var medication = new MedicamentoEmUso(null, name, dose, quantity, unit, notes, true, List.of());
         treatmentRules.validateAddition(context, treatmentId, medication);
         if (!repository.add(treatmentId, context.userId(), medication)) {
+            // Revalida para distinguir encerramento concorrente de recurso inacessivel.
+            treatmentRules.validateAddition(context, treatmentId, medication);
             throw new ResourceNotFoundException();
         }
         return medication;

@@ -1,8 +1,23 @@
 # Medicamentos em uso — issue #27
 
-**Estado da entrega: implementacao parcial, com integracoes pendentes.**
-O codigo de medicamentos esta preparado e testado nas condicoes abaixo,
-mas os endpoints ainda nao estao disponiveis ao iniciar a Main atual.
+**Atualizacao da etapa 6 em 21/11/2026:** as rotas de medicamentos estao
+registradas na Main com DefaultTreatmentMedicationRules e TreatmentService.
+A suite completa executada com MongoDB local teve 261 testes aprovados,
+zero falhas, zero erros e zero testes ignorados.
+
+O teste realTreatmentLifecycleWorksThroughHttp utiliza servidor HTTP, sessoes
+persistidas e as regras reais dos tratamentos. Cobre rascunho, edicao, consulta,
+titularidade, revisao desatualizada, ativacao, protecao do ultimo medicamento
+ativo, encerramento e preservacao do historico por outra conexao MongoDB.
+O cronograma desse cenario e um dado preparado pelo teste: o fluxo de
+versionamento da #28 ainda sera integrado nas proximas etapas.
+Os testes existentes tambem verificam concorrencia de edicao e desativacao.
+Nenhum dado do Atlas foi utilizado.
+
+**Registro anterior:** as secoes abaixo descrevem a entrega antes desta
+integracao. Referencias a rotas desativadas, ausencia de regras reais e resultados
+antigos nao representam o estado atual. A revisao completa do contrato e das
+pendencias sera feita depois da integracao de versionamento com a #28.
 
 ## O que foi preparado
 

@@ -12,6 +12,45 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MedicationInUseServiceTest {
+    @Test
+    void treatmentRulesUseRealIdentityAndStates() {
+        var repository = org.mockito.Mockito.mock(backend.repositories.TreatmentRepository.class);
+        var owner = new AuthContext("owner");
+        var rules = new backend.services.DefaultTreatmentMedicationRules(
+            new backend.services.TreatmentService(repository));
+        var schedule = new CronogramaDose(List.of("08:00"), "2026-11-19", "America/Sao_Paulo");
+        var medication = new MedicamentoEmUso("m", "Demo", "50 mg", 1, "mL", null, true, List.of(schedule));
+        var incomplete = new MedicamentoEmUso("new", "Demo", "50 mg", null, null, null, true, List.of());
+        var draft = new backend.models.Treatment("t", "owner", "Demo", null,
+            java.time.LocalDate.parse("2026-11-19"), null, backend.models.TreatmentStatus.DRAFT, null, List.of(medication));
+        org.mockito.Mockito.when(repository.findByIdAndUserId("t", "owner")).thenReturn(Optional.of(draft));
+        org.mockito.Mockito.when(repository.findByIdAndUserId("t", "other")).thenReturn(Optional.empty());
+        assertDoesNotThrow(() -> rules.validateAddition(owner, "t", incomplete));
+        assertDoesNotThrow(() -> rules.validateDeactivation(owner, "t", medication));
+        assertEquals(0, rules.minimumRemainingActiveMedications(owner, "t"));
+        assertThrows(ResourceNotFoundException.class,
+            () -> rules.validateAddition(new AuthContext("other"), "t", medication));
+        draft.activate();
+        assertDoesNotThrow(() -> rules.validateUpdate(owner, "t", medication));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateAddition(owner, "t", incomplete));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateUpdate(owner, "t", incomplete));
+        assertEquals(1, rules.minimumRemainingActiveMedications(owner, "t"));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateDeactivation(owner, "t", medication));
+        var other = new MedicamentoEmUso("other", "Demo", "50 mg", 1, "mL", null, true, List.of(schedule));
+        draft.addMedication(other);
+        assertDoesNotThrow(() -> rules.validateDeactivation(owner, "t", medication));
+        draft.close(java.time.Instant.now());
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateAddition(owner, "t", medication));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateUpdate(owner, "t", medication));
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> rules.validateDeactivation(owner, "t", medication));
+    }
+
     private final AuthContext a = new AuthContext("a");
     private final AuthContext b = new AuthContext("b");
 

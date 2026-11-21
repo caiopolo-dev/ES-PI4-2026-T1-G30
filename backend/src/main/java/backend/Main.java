@@ -63,6 +63,16 @@ public class Main {
             TreatmentHandler treatmentHandler =
                     new TreatmentHandler(treatmentService);
 
+            // Medicamentos em uso utilizam a mesma conexao e as regras do tratamento.
+            MedicationInUseRepository medicationInUseRepository =
+                    new MongoMedicationInUseRepository(mongoConnection.getCollection("treatments"));
+            TreatmentMedicationRules treatmentMedicationRules =
+                    new DefaultTreatmentMedicationRules(treatmentService);
+            MedicationInUseService medicationInUseService =
+                    new MedicationInUseService(medicationInUseRepository, treatmentMedicationRules);
+            MedicationInUseHandler medicationInUseHandler =
+                    new MedicationInUseHandler(medicationInUseService);
+
             // issue 28 - Compartilha o mesmo repositório MongoDB com o serviço de cronogramas.
             ScheduleService scheduleService = new ScheduleService(treatmentRepository);
             ScheduleHandler scheduleHandler = new ScheduleHandler(scheduleService);
@@ -106,6 +116,7 @@ public class Main {
             router.register("PUT", "/treatments/{id}", treatmentHandler);
             router.register("POST", "/treatments/{id}/activate", treatmentHandler);
             router.register("POST", "/treatments/{id}/close", treatmentHandler);
+            medicationInUseHandler.registerRoutes(router);
 
             // issue 28 - Registra configuração e consulta do cronograma do medicamento.
             scheduleHandler.registerRoutes(router);
