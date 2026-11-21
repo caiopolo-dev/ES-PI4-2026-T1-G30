@@ -16,6 +16,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import backend.models.PlannedDoseIdentity;
+
+import java.util.ArrayList;
+import java.util.concurrent.*;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -369,4 +374,226 @@ public class MongoPlannedDoseRepositoryTest {
         assertEquals(1, resultado.size());
         assertEquals("dose-001", resultado.get(0).getId());
     }
+
+    @Test
+    void doseCanceladaNaoDeveSerReativada() {
+
+        DosePrevista dose = criarDose(
+                "dose-001", "user-001", "trat-001", "med-001",
+                "2026-11-21T11:00:00Z"
+        );
+
+        // Insere e cancela a ocorrência original.
+        repository.save(dose);
+        repository.save(dose.cancel());
+
+        // Simula uma segunda geração da mesma ocorrência.
+        // O ID informado é diferente, mas a identidade lógica é igual.
+        DosePrevista novaGeracao = criarDose(
+                "dose-002", "user-001", "trat-001", "med-001",
+                "2026-11-21T11:00:00Z"
+        );
+
+        DosePrevista resultado = repository.save(novaGeracao);
+
+        // A ocorrência original deve continuar cancelada.
+        assertEquals("dose-001", resultado.getId());
+        assertEquals(ScheduleStatus.CANCELLED, resultado.getStatus());
+
+        assertEquals(1, repository.countAll());
+    }
+
+    @Test
+    void cancelamentoNaoDeveCriarDoseInexistente() {
+
+        DosePrevista dose = criarDose(
+                "dose-001", "user-001", "trat-001", "med-001",
+                "2026-11-21T11:00:00Z"
+        );
+
+        // Não existe uma ocorrência armazenada para cancelar.
+        assertThrows(IllegalStateException.class, () ->
+                repository.save(dose.cancel())
+        );
+
+        // Nenhum documento deve ter sido criado.
+        assertEquals(0, repository.countAll());
+    }
+
+
+    @Test
+    void geracoesConcorrentesNaoDevemDuplicarDoses() throws Exception {
+
+        Instant horario = Instant.parse("2026-11-21T11:00:00Z");
+
+        String id = PlannedDoseIdentity.generateId(
+                "user-001", "trat-001", "med-001", 1, horario
+        );
+
+        DosePrevista dose = criarDose(
+                id, "user-001", "trat-001", "med-001",
+                horario.toString()
+        );
+
+        int quantidadeThreads = 8;
+
+        // Cria um conjunto de threads para executar as inserções.
+        ExecutorService executor = Executors.newFixedThreadPool(quantidadeThreads);
+
+        // CountDownLatch permite sincronizar o início das operações.
+        CountDownLatch prontas = new CountDownLatch(quantidadeThreads);
+        CountDownLatch inicio = new CountDownLatch(1);
+
+        List<Future<DosePrevista>> resultados = new ArrayList<>();
+
+        try {
+
+            for (int i = 0; i < quantidadeThreads; i++) {
+
+                resultados.add(executor.submit(() -> {
+
+                    // Informa que a thread está pronta.
+                    prontas.countDown();
+
+                    // Aguarda a autorização para iniciar a inserção.
+                    inicio.await();
+
+                    return repository.save(dose);
+                }));
+            }
+
+            // Aguarda todas as threads estarem prontas.
+            assertTrue(prontas.await(10, TimeUnit.SECONDS));
+
+            // Libera todas as threads para executar as operações.
+            inicio.countDown();
+
+            for (Future<DosePrevista> resultado : resultados) {
+
+                DosePrevista salva = resultado.get(30, TimeUnit.SECONDS);
+
+                assertEquals(id, salva.getId());
+                assertEquals(ScheduleStatus.SCHEDULED, salva.getStatus());
+            }
+
+            // Apesar das oito tentativas de inserção,
+            // somente uma ocorrência deve existir no MongoDB.
+            assertEquals(1, repository.countAll());
+
+        } finally {
+
+            // Libera os recursos utilizados pelo executor.
+            inicio.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void encerramentoDevePreservarDosesHistoricas() {
+
+        DosePrevista passada = criarDose(
+                "dose-001", "user-001", "trat-001", "med-001",
+                "2026-11-21T11:00:00Z"
+        );
+
+        DosePrevista futura = criarDose(
+                "dose-002", "user-001", "trat-001", "med-001",
+                "2026-11-21T23:00:00Z"
+        );
+
+        DosePrevista outroTratamento = criarDose(
+                "dose-003", "user-001", "trat-002", "med-002",
+                "2026-11-21T23:00:00Z"
+        );
+
+        DosePrevista outroUsuario = criarDose(
+                "dose-004", "user-002", "trat-001", "med-001",
+                "2026-11-21T23:00:00Z"
+        );
+
+        repository.saveAll(List.of(
+                passada, futura, outroTratamento, outroUsuario
+        ));
+
+        // O encerramento ocorre entre as duas doses do tratamento.
+        Instant encerramento = Instant.parse("2026-11-21T15:00:00Z");
+
+        long canceladas = repository.cancelScheduledForTreatmentFrom("user-001", "trat-001", encerramento);
+
+        assertEquals(1, canceladas);
+
+        assertEquals(ScheduleStatus.SCHEDULED,
+                repository.findById(passada.getId()).orElseThrow().getStatus());
+
+        assertEquals(ScheduleStatus.CANCELLED,
+                repository.findById(futura.getId()).orElseThrow().getStatus());
+
+        assertEquals(ScheduleStatus.SCHEDULED,
+                repository.findById(outroTratamento.getId()).orElseThrow().getStatus());
+
+        assertEquals(ScheduleStatus.SCHEDULED,
+                repository.findById(outroUsuario.getId()).orElseThrow().getStatus());
+
+        // Nenhum documento histórico deve ser excluído.
+        assertEquals(4, repository.countAll());
+
+        // Uma segunda execução não deve modificar nenhum documento.
+        assertEquals(0, repository.cancelScheduledForTreatmentFrom("user-001", "trat-001", encerramento));
+    }
+
+    @Test
+    void cancelamentoDeveAfetarSomenteVersaoInformada() {
+
+        DosePrevista versaoAntiga = criarDose(
+                "dose-v1", "user-001", "trat-001", "med-001",
+                "2026-11-21T23:00:00Z"
+        );
+
+        // A nova versão possui o mesmo horário,
+        // mas representa uma ocorrência diferente.
+        DosePrevista versaoNova = new DosePrevista(
+                "dose-v2",
+                "user-001",
+                "trat-001",
+                "med-001",
+                "Medicamento de teste",
+                2,
+                Instant.parse("2026-11-21T23:00:00Z"),
+                "America/Sao_Paulo",
+                BigDecimal.ONE,
+                ScheduleStatus.SCHEDULED
+        );
+
+        DosePrevista outroMedicamento = criarDose(
+                "dose-outro", "user-001", "trat-001", "med-002",
+                "2026-11-21T23:00:00Z"
+        );
+
+        repository.saveAll(List.of(
+                versaoAntiga, versaoNova, outroMedicamento
+        ));
+
+        // O limite é inclusivo: uma dose exatamente nesse instante
+        // também deve ser cancelada.
+        Instant inicio = Instant.parse("2026-11-21T23:00:00Z");
+
+        long canceladas = repository.cancelScheduledForMedicationVersionFrom(
+                "user-001", "trat-001", "med-001", 1, inicio
+        );
+
+        assertEquals(1, canceladas);
+
+        assertEquals(ScheduleStatus.CANCELLED,
+                repository.findById("dose-v1").orElseThrow().getStatus());
+
+        assertEquals(ScheduleStatus.SCHEDULED,
+                repository.findById("dose-v2").orElseThrow().getStatus());
+
+        assertEquals(ScheduleStatus.SCHEDULED,
+                repository.findById("dose-outro").orElseThrow().getStatus());
+
+        assertEquals(3, repository.countAll());
+    }
+
+
 }

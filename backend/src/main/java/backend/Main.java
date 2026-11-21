@@ -9,6 +9,7 @@ import backend.services.*;
 
 import backend.router.Router;
 import backend.server.Servidor;
+import java.time.Clock;
 
 public class Main {
 
@@ -62,9 +63,24 @@ public class Main {
             TreatmentRepository treatmentRepository =
                     new MongoTreatmentRepository(mongoConnection.getDatabase());
 
-            // Serviço responsável pelas regras de negócio dos tratamentos
+            // Relógio utilizado pelos serviços de tratamentos e geração de doses.
+            Clock clock = Clock.systemUTC();
+
+            // Serviço responsável pela geração e reconciliação das doses.
+            DoseGenerationService doseGenerationService =
+                    new DoseGenerationService(
+                            treatmentRepository,
+                            plannedDoseRepository,
+                            clock
+                    );
+
+            // Serviço responsável pelo ciclo de vida dos tratamentos.
             TreatmentService treatmentService =
-                    new TreatmentService(treatmentRepository);
+                    new TreatmentService(
+                            treatmentRepository,
+                            clock,
+                            doseGenerationService
+                    );
 
             // Handler que recebe as requisições HTTP de tratamentos
             TreatmentHandler treatmentHandler =
@@ -75,9 +91,17 @@ public class Main {
                     new MongoMedicationInUseRepository(mongoConnection.getCollection("treatments"));
             TreatmentMedicationRules treatmentMedicationRules =
                     new DefaultTreatmentMedicationRules(treatmentService);
-            ScheduleService scheduleService = new ScheduleService(treatmentRepository);
+
+            ScheduleService scheduleService = new ScheduleService(treatmentRepository, doseGenerationService);
+
             MedicationInUseService medicationInUseService =
-                    new MedicationInUseService(medicationInUseRepository, treatmentMedicationRules, scheduleService);
+                    new MedicationInUseService(
+                            medicationInUseRepository,
+                            treatmentMedicationRules,
+                            scheduleService,
+                            doseGenerationService
+                    );
+
             MedicationInUseHandler medicationInUseHandler =
                     new MedicationInUseHandler(medicationInUseService);
 
@@ -131,9 +155,16 @@ public class Main {
             scheduleHandler.registerRoutes(router);
 
 
-            // Inicialização do servidor
-            Servidor servidor = new Servidor(porta, router);
-            servidor.aceitadorDeConexao();
+            //!!!!!!!!!!!!!
+            // Inicializa o servidor e a reconciliação periódica das doses (job).
+            try (DoseReconciliationJob job = new DoseReconciliationJob(treatmentRepository, doseGenerationService)) {
+
+                job.start();
+
+                Servidor servidor = new Servidor(porta, router);
+                servidor.aceitadorDeConexao();
+            }
+
         }
     }
 }

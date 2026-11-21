@@ -31,7 +31,10 @@ class MedicationInUseServiceTest {
         assertEquals("comprimido", prepared.previous().getUnit());
         assertEquals(2, prepared.updated().getQuantity());
         assertEquals("mL", prepared.updated().getUnit());
-        assertEquals(history, prepared.updated().getSchedules());
+        assertEquals(List.of(
+                history.get(0).withPosologySnapshot(1, "comprimido"),
+                history.get(1).withPosologySnapshot(2, "mL")
+        ), prepared.updated().getSchedules());
         assertEquals(0L, prepared.updated().getRevision());
         assertEquals(effective, prepared.validFrom());
         assertEquals(List.of(previousSchedule), service.find(a, "t", "m").getSchedules());

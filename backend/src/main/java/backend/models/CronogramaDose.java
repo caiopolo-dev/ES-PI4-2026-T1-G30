@@ -37,6 +37,11 @@ public class CronogramaDose {
     private final String timezone;
     private final boolean active;
 
+    // Preserva a quantidade e a unidade correspondentes
+    // à posologia desta versão do cronograma.
+    private final Integer quantitySnapshot;
+    private final String unitSnapshot;
+
     // Novo construtor: recebe a frequência explicitamente.
     // issue 28 - Mantém a assinatura antiga e encaminha a validação ao construtor com vigência.
     public CronogramaDose(
@@ -47,10 +52,14 @@ public class CronogramaDose {
             String startDate,
             String endDate,
             String timezone,
-            boolean active) {
+            boolean active,
+            Instant validFrom,
+            Instant validTo) {
 
+        // Mantém a compatibilidade com cronogramas sem snapshot.
         this(version, frequency, daysOfWeek, times,
-                startDate, endDate, timezone, active, null, null);
+                startDate, endDate, timezone, active,
+                validFrom, validTo, null, null);
     }
 
     // issue 28 - Novo construtor que recebe a vigência e mantém as validações existentes.
@@ -64,7 +73,9 @@ public class CronogramaDose {
             String timezone,
             boolean active,
             Instant validFrom,
-            Instant validTo) {
+            Instant validTo,
+            Integer quantitySnapshot,
+            String unitSnapshot) {
 
         if (version < 1) {
             throw new IllegalArgumentException(
@@ -118,9 +129,46 @@ public class CronogramaDose {
 
         this.validFrom = validFrom;
         this.validTo = validTo;
+
+        // Permite a ausência do snapshot para manter a compatibilidade
+        // com cronogramas armazenados antes da issue #30.
+        if (quantitySnapshot == null && unitSnapshot != null) {
+            throw new IllegalArgumentException("Snapshot deve possuir quantidade");
+        }
+
+        if (quantitySnapshot != null) {
+
+            if (quantitySnapshot <= 0) {
+                throw new IllegalArgumentException("Quantidade do snapshot deve ser positiva");
+            }
+
+            if (unitSnapshot == null || unitSnapshot.isBlank()) {
+                throw new IllegalArgumentException("Unidade do snapshot inválida");
+            }
+        }
+
+        this.quantitySnapshot = quantitySnapshot;
+        this.unitSnapshot = unitSnapshot == null ? null : unitSnapshot.trim();
     }
 
     // Construtor antigo: preservado para compatibilidade.
+    public CronogramaDose(
+            int version,
+            ScheduleFrequency frequency,
+            List<String> daysOfWeek,
+            List<String> times,
+            String startDate,
+            String endDate,
+            String timezone,
+            boolean active) {
+
+        this(version, frequency, daysOfWeek, times,
+                startDate, endDate, timezone, active,
+                null, null);
+    }
+
+    // Construtor antigo: preservado para compatibilidade.
+    // Infere a frequência a partir dos dias da semana informados.
     public CronogramaDose(
             int version,
             List<String> daysOfWeek,
@@ -130,7 +178,6 @@ public class CronogramaDose {
             String timezone,
             boolean active) {
 
-        // issue 28
         this(version, inferFrequency(daysOfWeek), daysOfWeek,
                 times, startDate, endDate, timezone, active);
     }
@@ -301,36 +348,42 @@ public class CronogramaDose {
     }
 
     public CronogramaDose withActive(boolean newActive) {
+
         if (active == newActive) {
             return this;
         }
 
-        // issue 28 - Preserva a frequência e a vigência ao copiar o cronograma.
         return new CronogramaDose(
                 version, frequency, daysOfWeek, times,
                 startDate, endDate, timezone, newActive,
-                validFrom, validTo);
+                validFrom, validTo, quantitySnapshot, unitSnapshot
+        );
     }
 
     public CronogramaDose withVersion(int newVersion) {
+
         if (version == newVersion) {
             return this;
         }
 
-        // issue 28 - Preserva a frequência e a vigência ao alterar o número da versão.
         return new CronogramaDose(
                 newVersion, frequency, daysOfWeek, times,
                 startDate, endDate, timezone, active,
-                validFrom, validTo);
+                validFrom, validTo, quantitySnapshot, unitSnapshot
+        );
     }
 
-
-    // issue 28 - Cria uma cópia do cronograma com uma nova vigência.
     public CronogramaDose withValidity(Instant from, Instant to) {
-        if (Objects.equals(validFrom, from) &&Objects.equals(validTo, to)) {
+
+        if (Objects.equals(validFrom, from) && Objects.equals(validTo, to)) {
             return this;
         }
-        return new CronogramaDose(version, frequency, daysOfWeek, times,startDate, endDate, timezone, active,from, to);
+
+        return new CronogramaDose(
+                version, frequency, daysOfWeek, times,
+                startDate, endDate, timezone, active,
+                from, to, quantitySnapshot, unitSnapshot
+        );
     }
 
 
@@ -365,7 +418,12 @@ public class CronogramaDose {
                 newStartDate,
                 newEndDate,
                 newTimezone == null ? timezone : newTimezone,
-                true);
+                true,
+                null,
+                null,
+                quantitySnapshot,
+                unitSnapshot
+        );
     }
 
     public CronogramaDose nextVersion(
@@ -373,8 +431,10 @@ public class CronogramaDose {
             String newStartDate) {
 
         return new CronogramaDose(
-                version + 1, frequency, daysOfWeek,
-                newTimes, newStartDate, endDate, timezone, true);
+                version + 1, frequency, daysOfWeek, newTimes,
+                newStartDate, endDate, timezone, true,
+                null, null, quantitySnapshot, unitSnapshot
+        );
     }
 
     // issue 28
@@ -410,7 +470,9 @@ public class CronogramaDose {
                 && Objects.equals(timezone, that.timezone)
                 // issue 28 - Diferencia versões com períodos de vigência distintos.
                 && Objects.equals(validFrom, that.validFrom)
-                && Objects.equals(validTo, that.validTo);
+                && Objects.equals(validTo, that.validTo)
+                && Objects.equals(quantitySnapshot, that.quantitySnapshot)
+                && Objects.equals(unitSnapshot, that.unitSnapshot);
     }
 
     @Override
@@ -419,7 +481,8 @@ public class CronogramaDose {
         return Objects.hash(
                 version, frequency, daysOfWeek, times,
                 startDate, endDate, timezone, active,
-                validFrom, validTo);
+                validFrom, validTo, quantitySnapshot, unitSnapshot
+        );
     }
 
     @Override
@@ -436,6 +499,37 @@ public class CronogramaDose {
                 // issue 28 - Exibe o período de vigência para facilitar a leitura do objeto.
                 + ", validFrom=" + validFrom
                 + ", validTo=" + validTo
+                + ", quantitySnapshot=" + quantitySnapshot
+                + ", unitSnapshot='" + unitSnapshot + '\''
                 + '}';
+    }
+
+    // Cria uma cópia do cronograma contendo os dados da posologia.
+    // O cronograma original permanece inalterado.
+    public CronogramaDose withPosologySnapshot(Integer quantity, String unit) {
+
+        if (quantity == null || unit == null || unit.isBlank()) {
+            throw new IllegalArgumentException("Snapshot da posologia incompleto");
+        }
+
+        return new CronogramaDose(
+                version, frequency, daysOfWeek, times,
+                startDate, endDate, timezone, active,
+                validFrom, validTo, quantity, unit
+        );
+    }
+
+
+
+    public Integer getQuantitySnapshot() {
+        return quantitySnapshot;
+    }
+
+    public String getUnitSnapshot() {
+        return unitSnapshot;
+    }
+
+    public boolean hasPosologySnapshot() {
+        return quantitySnapshot != null && unitSnapshot != null;
     }
 }

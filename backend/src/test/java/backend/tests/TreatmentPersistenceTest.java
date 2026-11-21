@@ -30,6 +30,15 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import backend.auth.AuthContext;
+import backend.repositories.MongoPlannedDoseRepository;
+import backend.services.DoseGenerationService;
+import backend.services.TreatmentService;
+import backend.models.DosePrevista;
+import backend.models.ScheduleStatus;
+
+import java.time.Clock;
+import java.time.ZoneOffset;
 
 /**
  * Testes de integração da persistência de tratamentos, medicamentos em uso,
@@ -571,4 +580,131 @@ public class TreatmentPersistenceTest {
         assertEquals(1, unchanged.getSchedules().size());
         assertEquals(List.of(schedule), unchanged.getSchedules());
     }
+
+
+    @Test
+    void devePersistirSnapshotDaPosologia() {
+
+        CronogramaDose cronograma = new CronogramaDose(
+                List.of("08:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withPosologySnapshot(2, "comprimido");
+
+        MedicamentoEmUso medicamento = new MedicamentoEmUso(
+                "med-1",
+                "Medicamento de teste",
+                "50 mg",
+                2,
+                "comprimido",
+                null,
+                true,
+                List.of(cronograma)
+        );
+
+        Treatment tratamento = new Treatment(
+                "user-1",
+                "Tratamento de teste",
+                null,
+                LocalDate.of(2026, 11, 21),
+                null
+        );
+
+        tratamento.addMedication(medicamento);
+
+        repository.save(tratamento);
+
+        // Recupera o tratamento persistido no MongoDB.
+        Treatment recuperado = repository.findById(tratamento.getId())
+                .orElseThrow();
+
+        CronogramaDose cronogramaRecuperado = recuperado
+                .findMedicationById("med-1").orElseThrow()
+                .getActiveSchedule().orElseThrow();
+
+        assertTrue(cronogramaRecuperado.hasPosologySnapshot());
+        assertEquals(Integer.valueOf(2), cronogramaRecuperado.getQuantitySnapshot());
+        assertEquals("comprimido", cronogramaRecuperado.getUnitSnapshot());
+    }
+
+
+    @Test
+    void ativacaoEEncerramentoDevemGerenciarDosesPrevistas() {
+
+        Instant agora = Instant.parse("2026-11-21T15:00:00Z");
+
+        Clock clock = Clock.fixed(agora, ZoneOffset.UTC);
+
+        MongoPlannedDoseRepository dosesRepository =
+                new MongoPlannedDoseRepository(connection.getDatabase());
+
+        DoseGenerationService gerador = new DoseGenerationService(
+                repository, dosesRepository, clock
+        );
+
+        TreatmentService service = new TreatmentService(
+                repository, clock, gerador
+        );
+
+        AuthContext context = new AuthContext("user-1");
+
+        Treatment tratamento = new Treatment(
+                "user-1",
+                "Tratamento de teste",
+                null,
+                LocalDate.of(2026, 11, 21),
+                null
+        );
+
+        CronogramaDose cronograma = new CronogramaDose(
+                List.of("08:00", "20:00"),
+                "2026-11-21",
+                "America/Sao_Paulo"
+        ).withPosologySnapshot(1, "comprimido");
+
+        MedicamentoEmUso medicamento = new MedicamentoEmUso(
+                "med-1",
+                "Medicamento de teste",
+                "50 mg",
+                1,
+                "comprimido",
+                null,
+                true,
+                List.of(cronograma)
+        );
+
+        tratamento.addMedication(medicamento);
+
+        repository.save(tratamento);
+
+        assertEquals(0, dosesRepository.countAll());
+
+        // A ativação deve gerar automaticamente as doses.
+        service.activate(context, tratamento.getId());
+
+        assertEquals(59, dosesRepository.countAll());
+
+        // Reexecutar a geração não deve produzir duplicatas.
+        List<DosePrevista> doses = gerador.reconcile(
+                context.userId(), tratamento.getId()
+        );
+
+        assertEquals(59, dosesRepository.countAll());
+
+        // O encerramento deve cancelar todas as ocorrências futuras.
+        service.close(context, tratamento.getId());
+
+        for (DosePrevista dose : doses) {
+
+            DosePrevista armazenada = dosesRepository
+                    .findById(dose.getId()).orElseThrow();
+
+            assertEquals(ScheduleStatus.CANCELLED, armazenada.getStatus());
+        }
+
+        // Nenhuma ocorrência deve ser excluída.
+        assertEquals(59, dosesRepository.countAll());
+    }
+
+
 }

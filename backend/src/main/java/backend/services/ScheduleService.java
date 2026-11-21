@@ -1,4 +1,4 @@
-// Caio Ferreira Polo
+// Autor: Caio Ferreira Polo
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -25,13 +25,21 @@ public class ScheduleService {
     // issue 28 - Mantém a gravação condicional no mesmo repositório do tratamento.
     private final TreatmentRepository repository;
 
-    // issue 28
-    // Reutiliza o controle de acesso existente para verificar o titular.
+    private final DoseGenerationService doseGenerationService;
+
     public ScheduleService(TreatmentRepository repository) {
-        Objects.requireNonNull(repository, "repository não pode ser null");
-        this.repository = repository;
-        this.accessService = new TreatmentAccessService(repository);
+        this(repository, null);
     }
+
+    public ScheduleService(
+            TreatmentRepository repository,
+            DoseGenerationService doseGenerationService) {
+
+        this.repository = Objects.requireNonNull(repository);
+        this.accessService = new TreatmentAccessService(repository);
+        this.doseGenerationService = doseGenerationService;
+    }
+
 
     // issue 28
     // Consulta todas as versões do cronograma de um medicamento.
@@ -171,9 +179,22 @@ public class ScheduleService {
             throw new IllegalStateException("Limite de versões do cronograma atingido");
         }
 
-        // Prepara uma nova versão ativa com início de vigência.
-        // O término fica indefinido até a substituição ou encerramento.
-        return configuracao.withVersion(maiorVersao + 1).withActive(true).withValidity(inicioVigencia, null);
+        CronogramaDose novaVersao = configuracao
+                .withVersion(maiorVersao + 1)
+                .withActive(true)
+                .withValidity(inicioVigencia, null);
+
+        // Captura a posologia do medicamento no momento
+        // em que a nova versão do cronograma é preparada.
+        if (medicamento.getQuantity() != null && medicamento.getUnit() != null) {
+
+            novaVersao = novaVersao.withPosologySnapshot(
+                    medicamento.getQuantity(),
+                    medicamento.getUnit()
+            );
+        }
+
+        return novaVersao;
     }
 
     // issue 28 - Persiste a transição com revisão otimista e trata retransmissões idênticas.
@@ -185,65 +206,77 @@ public class ScheduleService {
             Instant inicioVigencia,
             long expectedRevision) {
 
-        if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) {
-            throw new IllegalArgumentException("Revisão inválida");
-        }
-
-        Treatment tratamento = accessService.find(context, treatmentId);
-        if (tratamento.getStatus() == TreatmentStatus.CLOSED) {
-            throw new IllegalStateException("Tratamento encerrado não pode alterar cronogramas");
-        }
-        MedicamentoEmUso atual = tratamento.findMedicationById(medicationId)
-                .orElseThrow(ResourceNotFoundException::new);
-        if (!atual.isActive()) {
-            throw new IllegalStateException("Medicamento inativo não pode alterar cronogramas");
-        }
-        // issue 28 - A idempotência só pode aceitar um histórico previamente consistente.
-        validarIntegridadeHistorico(atual.getSchedules());
-        Optional<CronogramaDose> cronogramaAtual = atual.getActiveSchedule();
-
-        if (cronogramaAtual.isPresent()
-                && cronogramaAtual.get().hasSameConfiguration(configuracao)
-                && Objects.equals(cronogramaAtual.get().getValidFrom(), inicioVigencia)
-                && cronogramaAtual.get().getValidTo() == null) {
-            return atual;
-        }
-
-        if (atual.getRevision() != expectedRevision) {
-            throw new MedicationOperationConflictException(
-                    "Cronograma alterado. Consulte os dados novamente.");
-        }
-
-        List<CronogramaDose> atualizado = prepararTransicao(
-                context, treatmentId, medicationId, configuracao, inicioVigencia);
-
-        boolean gravado = repository.updateMedicationSchedules(
-                treatmentId,
-                context.userId(),
-                medicationId,
-                expectedRevision,
-                atualizado
-        );
-
-        if (!gravado) {
-            MedicamentoEmUso concorrente = accessService.findMedication(
-                    context, treatmentId, medicationId);
-            // issue 28 - Não converte um histórico concorrente inconsistente em sucesso idempotente.
-            validarIntegridadeHistorico(concorrente.getSchedules());
-            Optional<CronogramaDose> concorrenteAtual = concorrente.getActiveSchedule();
-
-            if (concorrenteAtual.isPresent()
-                    && concorrenteAtual.get().hasSameConfiguration(configuracao)
-                    && Objects.equals(concorrenteAtual.get().getValidFrom(), inicioVigencia)
-                    && concorrenteAtual.get().getValidTo() == null) {
-                return concorrente;
+        synchronized (TreatmentMutationLock.MONITOR) {
+            if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) {
+                throw new IllegalArgumentException("Revisão inválida");
             }
 
-            throw new MedicationOperationConflictException(
-                    "Cronograma alterado durante a gravação.");
-        }
+            Treatment tratamento = accessService.find(context, treatmentId);
+            if (tratamento.getStatus() == TreatmentStatus.CLOSED) {
+                throw new IllegalStateException("Tratamento encerrado não pode alterar cronogramas");
+            }
+            MedicamentoEmUso atual = tratamento.findMedicationById(medicationId)
+                    .orElseThrow(ResourceNotFoundException::new);
+            if (!atual.isActive()) {
+                throw new IllegalStateException("Medicamento inativo não pode alterar cronogramas");
+            }
+            // issue 28 - A idempotência só pode aceitar um histórico previamente consistente.
+            validarIntegridadeHistorico(atual.getSchedules());
+            Optional<CronogramaDose> cronogramaAtual = atual.getActiveSchedule();
 
-        return accessService.findMedication(context, treatmentId, medicationId);
+            if (cronogramaAtual.isPresent()
+                    && cronogramaAtual.get().hasSameConfiguration(configuracao)
+                    && Objects.equals(cronogramaAtual.get().getValidFrom(), inicioVigencia)
+                    && cronogramaAtual.get().getValidTo() == null) {
+                return reconciliarDoses(context, treatmentId, atual);
+            }
+
+            if (atual.getRevision() != expectedRevision) {
+                throw new MedicationOperationConflictException("Cronograma alterado. Consulte os dados novamente.");
+            }
+
+            // Impede que uma nova configuração modifique doses históricas.
+            // Retransmissões de configurações existentes continuam permitidas.
+            if (tratamento.getStatus() == TreatmentStatus.ACTIVE
+                    && inicioVigencia.isBefore(Instant.now())) {
+
+                throw new IllegalArgumentException("Não é permitido alterar retroativamente um cronograma ativo");
+            }
+
+            List<CronogramaDose> atualizado = prepararTransicao(
+                    context, treatmentId, medicationId, configuracao, inicioVigencia);
+
+            boolean gravado = repository.updateMedicationSchedules(
+                    treatmentId,
+                    context.userId(),
+                    medicationId,
+                    expectedRevision,
+                    atualizado
+            );
+
+            if (!gravado) {
+                MedicamentoEmUso concorrente = accessService.findMedication(
+                        context, treatmentId, medicationId);
+                // issue 28 - Não converte um histórico concorrente inconsistente em sucesso idempotente.
+                validarIntegridadeHistorico(concorrente.getSchedules());
+                Optional<CronogramaDose> concorrenteAtual = concorrente.getActiveSchedule();
+
+                if (concorrenteAtual.isPresent()
+                        && concorrenteAtual.get().hasSameConfiguration(configuracao)
+                        && Objects.equals(concorrenteAtual.get().getValidFrom(), inicioVigencia)
+                        && concorrenteAtual.get().getValidTo() == null) {
+                    return reconciliarDoses(context, treatmentId, concorrente);
+                }
+
+                throw new MedicationOperationConflictException("Cronograma alterado durante a gravação.");
+            }
+
+            MedicamentoEmUso medicamentoAtualizado = accessService.findMedication(
+                    context, treatmentId, medicationId
+            );
+
+            return reconciliarDoses(context, treatmentId, medicamentoAtualizado);
+        }
     }
 
 
@@ -316,6 +349,19 @@ public class ScheduleService {
                                 inicioVigencia
                         )
                         .deactivate();
+
+                // Preserva a posologia da versão anterior antes de sua substituição.
+                // Para versões antigas sem snapshot, utiliza os dados da versão
+                // ainda aberta, antes de qualquer atualização do medicamento.
+                if (!encerrado.hasPosologySnapshot()
+                        && medicamento.getQuantity() != null
+                        && medicamento.getUnit() != null) {
+
+                    encerrado = encerrado.withPosologySnapshot(
+                            medicamento.getQuantity(),
+                            medicamento.getUnit()
+                    );
+                }
 
                 atualizado.add(encerrado);
 
@@ -419,6 +465,17 @@ public class ScheduleService {
     }
 
 
+    // Reconcilia as doses após a persistência do cronograma.
+    private MedicamentoEmUso reconciliarDoses(
+            AuthContext context,
+            String treatmentId,
+            MedicamentoEmUso medicamento) {
 
+        if (doseGenerationService != null) {
+            doseGenerationService.reconcile(context.userId(), treatmentId);
+        }
+
+        return medicamento;
+    }
 
 }
