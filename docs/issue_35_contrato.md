@@ -1,6 +1,8 @@
 # Issue #35 — contrato da consulta de histórico
 
-Contrato definido para orientar a implementação. Endpoint ainda não implementado.
+Handler implementado e rota registrada na Main na etapa 8, usando a autenticação
+e os repositories existentes. Na etapa 9, o endpoint foi validado com servidor HTTP,
+sessoes persistidas e MongoDB local: 12 testes da #35 aprovados, sem falhas ou ignorados.
 A revisão conjunta com frontend e responsável pelos indicadores fica pendente.
 
 ## Requisição
@@ -105,3 +107,57 @@ A operação é somente leitura: não gera doses, cancela ocorrências, registra
 altera tratamentos ou calcula percentuais/classificação de pontualidade.
 Os testes devem cobrir os cenários da #35, fronteiras dos dias, limite de 90 dias,
 ordenação estável, titularidade e ausência de efeitos de escrita.
+
+## Revisão conjunta pendente
+
+Os exemplos de consumo estão no [README](../README.md#histórico-de-doses-get-adherencehistory).
+Os pontos abaixo estão preparados para revisão, mas ainda não representam acordo
+confirmado com os responsáveis pelas outras partes:
+
+| Responsável | Pontos para confirmar |
+| --- | --- |
+| Frontend | Envelope e nomes dos campos; conversão dos instantes UTC para exibição; período em America/Sao_Paulo; limite inclusivo de 90 dias; filtros e lista vazia |
+| Frontend | Exibir ausência de ação como ausência de registro, sem assumir SKIPPED; distinguir futuras e canceladas; tratar nome e unidade ausentes |
+| Indicadores (#36) | Identidade da ocorrência, scheduledAt histórico, action e actualTime; seleção por data prevista mesmo com registro posterior |
+| Indicadores (#36) | O histórico inclui futuras e canceladas; sua presença na lista não significa elegibilidade para os indicadores. O cálculo e suas regras permanecem no serviço de indicadores |
+
+A revisão não exige implementar telas ou modificar o cálculo dos indicadores
+nesta issue. Eventuais ajustes no contrato devem ser combinados antes de alterar
+os consumidores.
+
+## Verificação final — etapa 11
+
+Em 21/11/2026, a suíte foi recompilada e executada com JDK 21 e MongoDB local
+isolado para testes, sem usar o Atlas:
+
+```powershell
+mvn -f backend/pom.xml clean test -Dmongo.integration=true
+```
+
+Para reproduzir os testes de integração, disponibilize MongoDB em
+`mongodb://127.0.0.1:27017` e configure `MONGODB_URI` com esse endereço e
+`MONGODB_DATABASE` com um nome exclusivo de testes. Use ambiente de testes,
+pois a suíte cria e remove seus dados temporários.
+
+Resultado: **275 testes JUnit, zero falhas, zero erros e zero ignorados**.
+Desses, 8 pertencem a DoseHistoryServiceTest e 4 a DoseHistoryIntegrationTest.
+MedicationTest e MongoConnectionTest também foram executados pelo método main
+e passaram; esses dois executáveis não entram na contagem do JUnit.
+
+| Critério da Definition of Done | Resultado e evidência |
+| --- | --- |
+| Consulta autenticada por intervalo | Implementada; HTTP com sessão persistida e validação das datas |
+| Ocorrências previstas, inclusive sem registro | Validado para TAKEN, SKIPPED, vencidas e futuras sem ação |
+| Associação ao registro, tratamento e medicamento | IDs e contexto da ocorrência persistida; registros recuperados em lote e vinculados ao titular |
+| Diferenciar ações, ausência e cancelamento | Ações explícitas, campos null quando ausentes e isCancelled independente da ação |
+| Preservar passado após mudança ou encerramento | Teste com alteração de cronograma, fechamento do tratamento e nova conexão com MongoDB |
+| Datas, fuso, filtros e ordenação | Testes dos limites locais, horário de verão histórico, 90 dias inclusivos, filtros e desempate por ID |
+| Bloquear acesso de outro usuário | Testes com duas sessões e filtros sem exposição de ocorrências alheias |
+| Consulta sem escrita | Verificação das interações do serviço e comparação das coleções antes e depois das requisições HTTP |
+| Testes de serviço, persistência e HTTP | 12 testes da #35 aprovados, inclusive integração com MongoDB e servidor HTTP reais |
+| DTO e README revisados com frontend e indicadores | **Pendente de revisão conjunta**, conforme os pontos preparados acima |
+
+Limite conhecido do contexto disponível: plannedUnit permanece null porque
+DosePrevista não persiste unidade histórica; medicationName também pode ser null.
+A consulta preserva os dados existentes e não reconstrói informações ausentes
+a partir do cadastro atual.

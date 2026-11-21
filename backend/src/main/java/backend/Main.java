@@ -47,6 +47,12 @@ public class Main {
             AdherenceService adherenceService =
                     new AdherenceService(plannedDoseRepository, doseRecordRepository);
 
+            // Reutilizei os repositories existentes porque o historico consulta as mesmas doses e registros.
+            DoseHistoryService doseHistoryService =
+                    new DoseHistoryService(plannedDoseRepository, doseRecordRepository);
+
+            HistoryHandler historyHandler = new HistoryHandler(doseHistoryService);
+
             // Configuração do cadastro de usuários
             UserRepository userRepository =
                     new MongoUserRepository(mongoConnection.getCollection("users"));
@@ -106,6 +112,7 @@ public class Main {
             router.register("GET", "/medications", medicationHandler);
             router.register("GET", "/doses", agendaHandler);
             router.register("GET", "/adherence/summary", adherenceHandler);
+            router.register("GET", "/adherence/history", historyHandler);
             router.register("POST", "/auth/register", authHandler);
             router.register("POST", "/auth/login", loginHandler);
             router.register("GET", "/auth/me", meHandler);

@@ -5,6 +5,7 @@ Backend do DoseCerta em Java 21, com Maven e MongoDB.
 - [Issue #15: implementação, configuração, execução e testes](docs/relatorio_issue_15.md)
 - [Issue #24: autorizacao, rotas protegidas, testes e pendencias](docs/autorizacao_issue_24.md)
 - [Issue #27: medicamentos em uso, contratos, testes e pendencias](docs/issue_27_endpoints.md)
+- [Issue #35: contrato da consulta de histórico](docs/issue_35_contrato.md)
 - [Modelagem física do MongoDB](docs/modelagem_fisica_mongoDB.md)
 
 Para iniciar o backend, configure `MONGODB_URI` e `MONGODB_DATABASE` e mantenha o
@@ -64,3 +65,73 @@ Authorization: Bearer <token>
 ```
 
 > Documentação técnica completa e resultados dos testes: [`docs/relatorio_adesao_pontualidade.md`](docs/relatorio_adesao_pontualidade.md).
+
+## Histórico de doses (`GET /adherence/history`)
+
+Consulta as doses previstas e seus registros do usuário autenticado, sem alterar
+o banco. Use um token de sessão válido e o endereço/porta do servidor em execução:
+
+```powershell
+curl.exe -i "http://127.0.0.1:8081/adherence/history?from=2026-11-03&to=2026-11-09" -H "Authorization: Bearer <token>"
+```
+
+Para restringir por tratamento e medicamento em uso, combine os filtros opcionais:
+
+```http
+GET /adherence/history?from=2026-11-03&to=2026-11-09&treatmentId=treatment-001&medicationInUseId=medication-001
+Authorization: Bearer <token>
+```
+
+Exemplo fictício de resposta `200 OK`:
+
+```json
+{
+  "from": "2026-11-03",
+  "to": "2026-11-09",
+  "timezone": "America/Sao_Paulo",
+  "referenceTime": "2026-11-09T15:00:00Z",
+  "items": [
+    {
+      "plannedDoseId": "dose-001",
+      "treatmentId": "treatment-001",
+      "medicationInUseId": "medication-001",
+      "medicationName": "Medicamento X",
+      "scheduleVersion": 1,
+      "scheduledAt": "2026-11-03T11:00:00Z",
+      "scheduleTimezone": "America/Sao_Paulo",
+      "plannedQuantity": 0.5,
+      "plannedUnit": null,
+      "action": "TAKEN",
+      "actualTime": "2026-11-03T11:05:00Z",
+      "recordedAt": "2026-11-03T11:06:00Z",
+      "isCancelled": false
+    }
+  ]
+}
+```
+
+`from` e `to` são obrigatórios, no formato `yyyy-MM-dd`, e abrangem até **90 dias
+locais inclusivos**, no fuso `America/Sao_Paulo`. A seleção usa `scheduledAt`,
+mesmo quando a ação foi registrada em outro dia. Os instantes da resposta estão
+em UTC (`Z`). A ordem é crescente por `scheduledAt` e, em empate, pelo ID da dose.
+
+Sem ocorrências, a resposta mantém o envelope e retorna `items: []`. Sem registro,
+`action`, `actualTime` e `recordedAt` são `null`; isso não significa `SKIPPED`.
+Doses futuras e canceladas também aparecem, com cancelamento indicado por
+`isCancelled`. `referenceTime` permite comparar o instante previsto com o momento
+da consulta. O endpoint não calcula percentuais nem classifica pontualidade.
+
+Os dados vêm da ocorrência persistida, preservando o horário e a versão históricos.
+`plannedUnit` permanece `null`, pois a ocorrência atual não armazena essa informação;
+o nome também pode ser `null` se estiver ausente na ocorrência. Não se preenchem
+esses campos com os dados atuais do medicamento.
+
+Sessão ausente, inválida ou expirada retorna `401`. Parâmetros inválidos, repetidos,
+desconhecidos, período invertido, superior a 90 dias ou corpo na consulta retornam
+`400`. O cliente não envia `userId`: a identidade vem da sessão. Filtros sem
+correspondência nas doses do titular retornam lista vazia. Falhas técnicas retornam
+`500`, sem detalhes internos.
+
+O [contrato completo](docs/issue_35_contrato.md) detalha os campos e limites.
+A revisão conjunta com frontend e responsável pelos indicadores (#36) está
+**pendente**; os pontos para alinhamento estão no contrato.
