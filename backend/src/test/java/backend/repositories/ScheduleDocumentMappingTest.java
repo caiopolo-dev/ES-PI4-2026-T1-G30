@@ -18,7 +18,7 @@ class ScheduleDocumentMappingTest {
         CronogramaDose schedule = new CronogramaDose(
                 3, ScheduleFrequency.DAYS_OF_WEEK, List.of("MONDAY", "FRIDAY"),
                 List.of("08:00", "20:00"), "2026-11-01", "2026-12-31",
-                "America/Sao_Paulo", false, from, to).withAdministration(2, "mL");
+                "America/Sao_Paulo", false, from, to).withPosologySnapshot(2, "mL");
 
         Document document = MongoTreatmentRepository.toScheduleDocument(schedule);
         CronogramaDose recovered = MongoTreatmentRepository.fromScheduleDocument(document);
@@ -27,13 +27,21 @@ class ScheduleDocumentMappingTest {
         assertEquals("DAYS_OF_WEEK", document.getString("frequency"));
         assertEquals(from.toString(), document.getString("validFrom"));
         assertEquals(to.toString(), document.getString("validTo"));
-        assertEquals(2, recovered.getQuantityPerAdministrationSnapshot());
+        assertEquals(2, recovered.getQuantitySnapshot());
         assertEquals("mL", recovered.getUnitSnapshot());
+        Document previousFormat = new Document(document);
+        previousFormat.remove("quantitySnapshot");
+        previousFormat.append("quantityPerAdministrationSnapshot", 2);
+        var previousRecovered = MongoTreatmentRepository.fromScheduleDocument(previousFormat);
+        assertEquals(schedule, previousRecovered);
+        Document rewritten = MongoTreatmentRepository.toScheduleDocument(previousRecovered);
+        assertEquals(2, rewritten.getInteger("quantitySnapshot"));
+        assertFalse(rewritten.containsKey("quantityPerAdministrationSnapshot"));
         assertEquals(2, schedule.withActive(true).withVersion(4)
-                .withValidity(from, null).getQuantityPerAdministrationSnapshot());
+                .withValidity(from, null).getQuantitySnapshot());
         assertEquals("mL", schedule.nextVersion(List.of("09:00"), "2026-12-02").getUnitSnapshot());
-        assertThrows(IllegalArgumentException.class, () -> schedule.withAdministration(0, "mL"));
-        assertThrows(IllegalArgumentException.class, () -> schedule.withAdministration(2, null));
+        assertThrows(IllegalArgumentException.class, () -> schedule.withPosologySnapshot(0, "mL"));
+        assertThrows(IllegalArgumentException.class, () -> schedule.withPosologySnapshot(2, null));
     }
 
     @Test
@@ -51,7 +59,7 @@ class ScheduleDocumentMappingTest {
         assertEquals(ScheduleFrequency.EVERY_DAY, recovered.getFrequency());
         assertNull(recovered.getValidFrom());
         assertNull(recovered.getValidTo());
-        assertNull(recovered.getQuantityPerAdministrationSnapshot());
+        assertNull(recovered.getQuantitySnapshot());
         assertNull(recovered.getUnitSnapshot());
     }
 }

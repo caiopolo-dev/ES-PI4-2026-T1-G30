@@ -27,15 +27,28 @@ public class TreatmentService {
     // Isso facilita os testes, pois podemos simular uma data fixa.
     private final Clock clock;
 
+    private final DoseGenerationService doseGenerationService;
+
+
     public TreatmentService(TreatmentRepository repository) {
-        this(repository, Clock.systemUTC());
+        this(repository, Clock.systemUTC(), null);
     }
 
     public TreatmentService(TreatmentRepository repository, Clock clock) {
+        this(repository, clock, null);
+    }
+
+    public TreatmentService(
+            TreatmentRepository repository,
+            Clock clock,
+            DoseGenerationService doseGenerationService) {
+
         this.repository = Objects.requireNonNull(repository);
         this.accessService = new TreatmentAccessService(repository);
         this.clock = Objects.requireNonNull(clock);
+        this.doseGenerationService = doseGenerationService;
     }
+
 
 
     // Cria um tratamento em DRAFT associado ao usuário autenticado
@@ -81,64 +94,93 @@ public class TreatmentService {
             String description,
             LocalDate startDate,
             LocalDate endDate) {
+        // synchronized evita que uma atualização geral do tratamento dispute a persistência com uma alteração de cronograma
+        synchronized (TreatmentMutationLock.MONITOR) {
+            Treatment treatment = accessService.find(context, treatmentId);
 
-        Treatment treatment = accessService.find(context, treatmentId);
-
-        // Tratamentos encerrados não podem ser alterados
-        if (treatment.getStatus() == TreatmentStatus.CLOSED) {
-            throw new IllegalStateException(
-                    "Tratamento encerrado não pode ser alterado");
-        }
-
-        if (treatment.getStatus() == TreatmentStatus.ACTIVE) {
-
-            // Um tratamento ativo não pode alterar seu período
-            if (!Objects.equals(treatment.getStartDate(), startDate)
-                    || !Objects.equals(treatment.getEndDate(), endDate)) {
+            // Tratamentos encerrados não podem ser alterados
+            if (treatment.getStatus() == TreatmentStatus.CLOSED) {
                 throw new IllegalStateException(
-                        "Não é permitido alterar o período de um tratamento ativo");
+                        "Tratamento encerrado não pode ser alterado");
             }
 
-            // Tratamentos ativos precisam manter um nome válido
-            if (name == null || name.isBlank()) {
-                throw new IllegalArgumentException(
-                        "Tratamento ativo deve possuir nome");
+            if (treatment.getStatus() == TreatmentStatus.ACTIVE) {
+
+                // Um tratamento ativo não pode alterar seu período
+                if (!Objects.equals(treatment.getStartDate(), startDate)
+                        || !Objects.equals(treatment.getEndDate(), endDate)) {
+                    throw new IllegalStateException(
+                            "Não é permitido alterar o período de um tratamento ativo");
+                }
+
+                // Tratamentos ativos precisam manter um nome válido
+                if (name == null || name.isBlank()) {
+                    throw new IllegalArgumentException(
+                            "Tratamento ativo deve possuir nome");
+                }
+
+            } else {
+
+                // Em DRAFT, o período planejado pode ser atualizado
+                treatment.updatePeriod(startDate, endDate);
             }
 
-        } else {
+            treatment.setName(name);
+            treatment.setDescription(description);
 
-            // Em DRAFT, o período planejado pode ser atualizado
-            treatment.updatePeriod(startDate, endDate);
+            return accessService.update(context, treatment);
         }
-
-        treatment.setName(name);
-        treatment.setDescription(description);
-
-        return accessService.update(context, treatment);
     }
-
 
     // Ativa um tratamento após validar suas informações
+    // e materializa suas doses previstas.
     public Treatment activate(AuthContext context, String treatmentId) {
 
-        Treatment treatment = accessService.find(context, treatmentId);
+        synchronized (TreatmentMutationLock.MONITOR) {
 
-        // O modelo verifica se a transição é permitida
-        treatment.activate();
+            Treatment treatment = accessService.find(context, treatmentId);
 
-        // Persiste o novo estado
-        return accessService.update(context, treatment);
+            // O modelo verifica se a transição é permitida.
+            treatment.activate();
+
+            // Persiste o novo estado antes de gerar as ocorrências.
+            Treatment atualizado = accessService.update(context, treatment);
+
+            reconciliarDoses(atualizado);
+
+            return atualizado;
+        }
     }
 
 
-    // Encerra um tratamento sem apagar seu histórico
+    // Encerra um tratamento sem apagar seu histórico.
     public Treatment close(AuthContext context, String treatmentId) {
 
-        Treatment treatment = accessService.find(context, treatmentId);
+        synchronized (TreatmentMutationLock.MONITOR) {
 
-        // Registra o instante atual do encerramento
-        treatment.close(clock.instant());
+            Treatment treatment = accessService.find(context, treatmentId);
 
-        return accessService.update(context, treatment);
+            // Registra o instante atual do encerramento.
+            treatment.close(clock.instant());
+
+            Treatment atualizado = accessService.update(context, treatment);
+
+            // Cancela as doses futuras do tratamento encerrado.
+            reconciliarDoses(atualizado);
+
+            return atualizado;
+        }
     }
+
+    // Atualiza as doses previstas quando o gerador está conectado.
+    private void reconciliarDoses(Treatment treatment) {
+
+        if (doseGenerationService != null) {
+            doseGenerationService.reconcile(
+                    treatment.getUserId(),
+                    treatment.getId()
+            );
+        }
+    }
+
 }

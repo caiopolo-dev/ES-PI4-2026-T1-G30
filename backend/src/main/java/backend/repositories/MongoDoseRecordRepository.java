@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.util.*;
 
 // IMPORT DAS CLASSES QUE COMUNICAM COM O MONGO
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
@@ -71,13 +73,26 @@ public class MongoDoseRecordRepository implements DoseRecordRepository{
 
 
         // Insere o registro somente se ainda não existir
-        Document salvo = collection.findOneAndUpdate(
-                filtro, // Localiza pelo ID da dose prevista
-                new Document("$setOnInsert", documento), // Insere sem sobrescrever registros existentes
-                new FindOneAndUpdateOptions()
-                        .upsert(true) // Insere caso não encontre o registro
-                        .returnDocument(ReturnDocument.AFTER) // Retorna o documento armazenado
-        );
+        Document salvo;
+        try {
+            salvo = collection.findOneAndUpdate(
+                    filtro, // Localiza pelo ID da dose prevista
+                    new Document("$setOnInsert", documento), // Insere sem sobrescrever registros existentes
+                    new FindOneAndUpdateOptions()
+                            .upsert(true) // Insere caso não encontre o registro
+                            .returnDocument(ReturnDocument.AFTER) // Retorna o documento armazenado
+            );
+        } catch (MongoException error) {
+            // Uma corrida de upsert pode perder para o índice único de plannedDoseId.
+            if (ErrorCategory.fromErrorCode(error.getCode()) != ErrorCategory.DUPLICATE_KEY) {
+                throw error;
+            }
+            salvo = collection.find(filtro).first();
+            if (salvo == null) {
+                // Uma colisão de _id ou outro erro de unicidade não é idempotência conhecida.
+                throw error;
+            }
+        }
 
         RegistroDeDose resultado = fromDocument(salvo);
 

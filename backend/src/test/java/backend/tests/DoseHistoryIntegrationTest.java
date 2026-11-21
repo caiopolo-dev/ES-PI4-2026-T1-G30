@@ -85,13 +85,16 @@ class DoseHistoryIntegrationTest {
                 planned.saveAll(List.of(taken, skipped,
                     storedDose("missing", "owner", "t-owner", "m1", 1, "2026-11-03T12:00:00Z"),
                     storedDose("future", "owner", "t-owner", "m1", 2, "2026-11-03T16:00:00Z"),
-                    storedDose("cancelled", "owner", "t-owner", "m1", 2, "2026-11-03T17:00:00Z").cancel(),
+                    storedDose("cancelled", "owner", "t-owner", "m1", 2, "2026-11-03T17:00:00Z"),
                     storedDose("old20", "owner", "t-owner", "m1", 1, "2026-11-03T23:00:00Z"),
                     storedDose("new21", "owner", "t-owner", "m1", 2, "2026-11-04T00:00:00Z"),
                     storedDose("start", "owner", "t-boundary", "m3", 1, "2026-11-03T03:00:00Z"),
                     storedDose("before", "owner", "t-boundary", "m3", 1, "2026-11-03T02:59:59.999Z"),
                     storedDose("end", "owner", "t-boundary", "m3", 1, "2026-11-04T03:00:00Z"),
                     storedDose("foreign", "other", "t-foreign", "other-med", 1, "2026-11-03T11:00:00Z")));
+
+                // O repository atual so cancela uma ocorrencia que ja foi persistida.
+                planned.save(planned.findById("cancelled").orElseThrow().cancel());
 
                 recorded.save(new RegistroDeDose("r-taken", "a-taken", "owner", DoseAction.TAKEN,
                     taken.getScheduledAt().plusSeconds(60), Instant.parse("2026-11-05T10:00:00Z")));

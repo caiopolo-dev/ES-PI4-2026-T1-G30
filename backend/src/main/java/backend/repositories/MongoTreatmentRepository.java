@@ -1,4 +1,4 @@
-//Autor: Cauã Bianchi Ferroni
+//Autor: Caio Ferreira Polo, Cauã Bianchi Ferroni (Principal), Samuel Campovilla
 package backend.repositories;
 
 import backend.models.CronogramaDose;
@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
-
+import com.mongodb.client.model.Projections;
 /**
  * Implementação de TreatmentRepository persistida diretamente no MongoDB
  * utilizando o driver oficial (mongodb-driver-sync).
@@ -303,7 +303,10 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         incomingMed.getObservations(),
                         incomingMed.isActive(),
                         mergedSchedules,
-                        incomingMed.getRevision()
+                        incomingMed.getRevision(),
+                        existingMed.getDeactivatedAt() != null
+                                ? existingMed.getDeactivatedAt()
+                                : incomingMed.getDeactivatedAt()
                 ));
             }
         }
@@ -424,7 +427,7 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 && Objects.equals(a.getTimezone(), b.getTimezone())
                 && Objects.equals(a.getValidFrom(), b.getValidFrom())
                 && Objects.equals(a.getValidTo(), b.getValidTo())
-                && Objects.equals(a.getQuantityPerAdministrationSnapshot(), b.getQuantityPerAdministrationSnapshot())
+                && Objects.equals(a.getQuantitySnapshot(), b.getQuantitySnapshot())
                 && Objects.equals(a.getUnitSnapshot(), b.getUnitSnapshot());
     }
 
@@ -485,7 +488,10 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                     .append("active", med.isActive())
                     .append("revision", med.getRevision())
                     .append("observations", med.getObservations())
-                    .append("schedules", scheduleDocs);
+                    .append("schedules", scheduleDocs)
+                    .append("deactivatedAt", med.getDeactivatedAt() == null
+                            ? null
+                            : Date.from(med.getDeactivatedAt()));
 
             medicationDocs.add(medDoc);
         }
@@ -545,7 +551,8 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         observations,
                         !Boolean.FALSE.equals(medDoc.get("active")),
                         schedules,
-                        medDoc.get("revision") instanceof Number ? ((Number) medDoc.get("revision")).longValue() : 0L
+                        medDoc.get("revision") instanceof Number ? ((Number) medDoc.get("revision")).longValue() : 0L,
+                        parseInstant(medDoc.get("deactivatedAt"))
                 ));
             }
         }
@@ -573,8 +580,6 @@ public class MongoTreatmentRepository implements TreatmentRepository {
     // issue 28 - Centraliza o formato BSON de todas as versões do cronograma.
     static Document toScheduleDocument(CronogramaDose schedule) {
         return new Document()
-                .append("quantityPerAdministrationSnapshot", schedule.getQuantityPerAdministrationSnapshot())
-                .append("unitSnapshot", schedule.getUnitSnapshot())
                 .append("version", schedule.getVersion())
                 .append("frequency", schedule.getFrequency().name())
                 .append("daysOfWeek", schedule.getDaysOfWeek() != null
@@ -590,7 +595,9 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                         : null)
                 .append("validTo", schedule.getValidTo() != null
                         ? schedule.getValidTo().toString()
-                        : null);
+                        : null)
+                .append("quantitySnapshot", schedule.getQuantitySnapshot())
+                .append("unitSnapshot", schedule.getUnitSnapshot());
     }
 
     // issue 28 - Reconstrói uma versão atual ou legada sem inventar instantes históricos.
@@ -618,7 +625,10 @@ public class MongoTreatmentRepository implements TreatmentRepository {
                 activeRaw == null || activeRaw,
                 parseInstant(schedDoc.get("validFrom")),
                 parseInstant(schedDoc.get("validTo")),
-                schedDoc.getInteger("quantityPerAdministrationSnapshot"),
+                // Le documentos gravados pela branch antiga, mas novas gravacoes usam quantitySnapshot.
+                schedDoc.containsKey("quantitySnapshot")
+                        ? schedDoc.getInteger("quantitySnapshot")
+                        : schedDoc.getInteger("quantityPerAdministrationSnapshot"),
                 schedDoc.getString("unitSnapshot")
         );
     }
@@ -685,4 +695,25 @@ public class MongoTreatmentRepository implements TreatmentRepository {
         }
         throw new IllegalArgumentException("Formato de quantidade inválido no documento MongoDB");
     }
+
+    @Override
+    public List<ReconciliationTarget> findDoseReconciliationTargets() {
+
+        List<ReconciliationTarget> tratamentos = new ArrayList<>();
+
+        // Tratamentos ativos precisam manter a janela de geração.
+        // Tratamentos encerrados podem possuir cancelamentos pendentes.
+        for (Document documento : collection.find(
+                        Filters.in("status", "ACTIVE", "CLOSED"))
+                .projection(Projections.include("_id", "userId"))) {
+
+            tratamentos.add(new ReconciliationTarget(
+                    documento.getString("userId"),
+                    documento.getString("_id")
+            ));
+        }
+
+        return tratamentos;
+    }
+
 }

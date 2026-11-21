@@ -99,8 +99,18 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
         Bson filter = Filters.and(owner(treatmentId, userId), writableStatus(), remainingSchedule,
             Filters.elemMatch("medications", current),
             new Document("$expr", new Document("$gt", List.of(activeCount, minimum))));
-        return treatments.updateOne(filter, Updates.combine(Updates.set("medications.$.active", false),
-            Updates.inc("medications.$.revision", 1L))).getMatchedCount() == 1;
+
+        // Desativa o medicamento e registra o instante da operação
+        // no mesmo comando atômico do MongoDB.
+        return treatments.updateOne(
+                filter,
+                Updates.combine(
+                        Updates.set("medications.$.active", false),
+                        Updates.currentDate("medications.$.deactivatedAt"),
+                        Updates.inc("medications.$.revision", 1L)
+                )
+        ).getMatchedCount() == 1;
+
     }
 
     private Bson revisionFilter(long revision) {

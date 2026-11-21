@@ -195,9 +195,9 @@ class MedicationInUseIntegrationTest {
                     var oldVersion = schedules.consultarNoInstante(owner, id, medicationId,
                         effective.minusNanos(1)).orElseThrow();
                     var newVersion = schedules.consultarNoInstante(owner, id, medicationId, effective).orElseThrow();
-                    assertEquals(1, oldVersion.getQuantityPerAdministrationSnapshot());
+                    assertEquals(1, oldVersion.getQuantitySnapshot());
                     assertEquals("comprimido", oldVersion.getUnitSnapshot());
-                    assertEquals(2, newVersion.getQuantityPerAdministrationSnapshot());
+                    assertEquals(2, newVersion.getQuantitySnapshot());
                     assertEquals("mL", newVersion.getUnitSnapshot());
                     assertEquals(effective, oldVersion.getValidTo());
 
@@ -206,7 +206,7 @@ class MedicationInUseIntegrationTest {
                         new backend.models.CronogramaDose(List.of("09:00"), "2026-11-19", "America/Sao_Paulo"),
                         effective.plusSeconds(86400), 3);
                     var latest = schedules.consultarHistorico(owner, id, medicationId).get(2);
-                    assertEquals(2, latest.getQuantityPerAdministrationSnapshot());
+                    assertEquals(2, latest.getQuantitySnapshot());
                     assertEquals("mL", latest.getUnitSnapshot());
                     assertEquals(List.of("09:00"), latest.getTimes());
 
@@ -224,9 +224,9 @@ class MedicationInUseIntegrationTest {
                             .find(id, "a", medicationId).orElseThrow();
                         assertEquals(3, restored.getSchedules().size());
                         assertEquals(4L, restored.getRevision());
-                        assertEquals(1, restored.getScheduleByVersion(1).orElseThrow().getQuantityPerAdministrationSnapshot());
+                        assertEquals(1, restored.getScheduleByVersion(1).orElseThrow().getQuantitySnapshot());
                         assertEquals("comprimido", restored.getScheduleByVersion(1).orElseThrow().getUnitSnapshot());
-                        assertEquals(2, restored.getScheduleByVersion(2).orElseThrow().getQuantityPerAdministrationSnapshot());
+                        assertEquals(2, restored.getScheduleByVersion(2).orElseThrow().getQuantitySnapshot());
                         assertEquals("mL", restored.getScheduleByVersion(2).orElseThrow().getUnitSnapshot());
                     }
                 } finally { server.parar(); thread.join(3000); assertFalse(thread.isAlive()); }

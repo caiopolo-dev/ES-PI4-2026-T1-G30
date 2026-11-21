@@ -35,4 +35,13 @@ public interface PlannedDoseRepository {
 
     // Retorna a quantidade de doses armazenadas
     int countAll();
+
+    // OOs métodos abaixo retornam long porque retornarão a quantidade de documentos efetivamente modificados
+    // O instante inicio representa o limite a partir do qual as ocorrências serão canceladas
+
+    // Cancela as doses futuras de um tratamento encerrado.
+    long cancelScheduledForTreatmentFrom(String userId, String treatmentId, Instant inicio);
+
+    // Cancela as doses futuras de uma versão específica do cronograma.
+    long cancelScheduledForMedicationVersionFrom(String userId, String treatmentId, String medicationInUseId, int scheduleVersion, Instant inicio);
 }

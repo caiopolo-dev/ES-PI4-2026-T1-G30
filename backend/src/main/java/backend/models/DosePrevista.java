@@ -4,6 +4,7 @@ package backend.models;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.Objects;
 
 // Representa uma ocorrência concreta de administração de um medicamento,
 // gerada a partir de um CronogramaDose.
@@ -99,6 +100,42 @@ public class DosePrevista {
                 plannedQuantity,
                 ScheduleStatus.CANCELLED
         );
+    }
+
+    @Override
+    public boolean equals(Object o) {
+
+        if (this == o) return true;
+
+        if (!(o instanceof DosePrevista)) return false;
+
+        DosePrevista outraDose = (DosePrevista) o;
+
+        // Duas doses com o mesmo ID representam a mesma ocorrência.
+        return Objects.equals(id, outraDose.id);
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 7;
+
+        hash = 31 * hash + (id == null ? 0 : id.hashCode());
+
+        return hash;
+    }
+
+    @Override
+    public String toString() {
+        return "DosePrevista{" +
+                "id='" + id + '\'' +
+                ", treatmentId='" + treatmentId + '\'' +
+                ", medicationInUseId='" + medicationInUseId + '\'' +
+                ", scheduleVersion=" + scheduleVersion +
+                ", scheduledAt=" + scheduledAt +
+                ", scheduleTimezone='" + scheduleTimezone + '\'' +
+                ", plannedQuantity=" + plannedQuantity +
+                ", status=" + status +
+                '}';
     }
 
     public String getId() {

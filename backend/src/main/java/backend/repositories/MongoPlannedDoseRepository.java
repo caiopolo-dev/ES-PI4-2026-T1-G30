@@ -19,6 +19,9 @@ import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReturnDocument;
 import org.bson.Document; // Documento no formato BSON adequado para o Mongo!
+import com.mongodb.MongoException;
+
+import java.time.temporal.ChronoUnit;
 
 import java.util.Date;
 
@@ -46,23 +49,48 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
         );
     }
 
-
     @Override
     public DosePrevista save(DosePrevista dose) {
+
         if (dose == null) {
             throw new IllegalArgumentException("Dose não pode ser null");
         }
 
-        // Identifica uma dose pelo usuário, tratamento, medicamento,
-        // versão do cronograma e horário previsto
+        // Identifica uma ocorrência pelos campos de sua identidade lógica.
         Document filtro = new Document("userId", dose.getUserId())
                 .append("treatmentId", dose.getTreatmentId())
                 .append("medicationInUseId", dose.getMedicationInUseId())
                 .append("scheduleVersion", dose.getScheduleVersion())
                 .append("scheduledAt", Date.from(dose.getScheduledAt()));
 
+        // Uma ocorrência cancelada só pode atualizar uma dose já existente.
+        if (dose.getStatus() == ScheduleStatus.CANCELLED) {
 
-        // Monta os dados que serão inseridos caso a dose ainda não exista
+            // Atualiza o status somente quando a ocorrência está agendada.
+            Document filtroCancelamento = new Document(filtro).append("status", ScheduleStatus.SCHEDULED.name());
+
+            Document atualizacao = new Document("$set", new Document("status", ScheduleStatus.CANCELLED.name()));
+
+            Document salvo = collection.findOneAndUpdate(
+                    filtroCancelamento,
+                    atualizacao,
+                    new FindOneAndUpdateOptions()
+                            .returnDocument(ReturnDocument.AFTER)
+            );
+
+            if (salvo != null) return fromDocument(salvo);
+
+            // Uma ocorrência já cancelada permanece cancelada.
+            Document existente = collection.find(filtro).first();
+
+            if (existente == null) {
+                throw new IllegalStateException("Não é possível cancelar uma dose inexistente");
+            }
+
+            return fromDocument(existente);
+        }
+
+        // Monta o documento completo somente para uma nova ocorrência.
         Document documento = new Document("_id", dose.getId())
                 .append("userId", dose.getUserId())
                 .append("treatmentId", dose.getTreatmentId())
@@ -71,23 +99,48 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
                 .append("scheduleVersion", dose.getScheduleVersion())
                 .append("scheduledAt", Date.from(dose.getScheduledAt()))
                 .append("scheduleTimezone", dose.getScheduleTimezone())
-                .append("plannedQuantity", new Decimal128(dose.getPlannedQuantity()));
+                .append("plannedQuantity", new Decimal128(dose.getPlannedQuantity()))
+                .append("status", ScheduleStatus.SCHEDULED.name());
 
-        // $setOnInsert: Insere os dados somente se a ocorrência ainda não existir
-        // $set: Atualiza o status mesmo quando a dose já estiver armazenada
-        Document atualizacao = new Document("$setOnInsert", documento)
-                .append("$set", new Document("status", dose.getStatus().name()));
+        // Insere os dados apenas quando a ocorrência ainda não existe.
+        // Se ela já existir, nenhum campo será alterado.
+        Document atualizacao = new Document("$setOnInsert", documento);
 
-        Document salvo = collection.findOneAndUpdate(
-                filtro, // Define os campos usados para localizar a dose
-                atualizacao,
-                new FindOneAndUpdateOptions()
-                        .upsert(true)  // Permite inserir um novo documento caso nenhum seja encontrado
-                        .returnDocument(ReturnDocument.AFTER) // Retorna o documento após a operação usando operador AFTER do mongo
-        );
+        try {
 
-        return fromDocument(salvo);
+            Document salvo = collection.findOneAndUpdate(
+                    filtro,
+                    atualizacao,
+                    new FindOneAndUpdateOptions()
+                            .upsert(true)
+                            .returnDocument(ReturnDocument.AFTER)
+            );
+
+            return fromDocument(salvo);
+
+        } catch (MongoException erro) {
+
+            // Em execuções concorrentes, duas operações podem disputar
+            // a inserção da mesma ocorrência.
+            // O erro 11000 representa uma violação de índice único.
+            if (erro.getCode() != 11000) {
+                throw erro;
+            }
+
+            // Recupera a ocorrência que venceu a inserção.
+            // Isso também preserva IDs antigos de documentos já existentes.
+            Document existente = collection.find(filtro).first();
+
+            if (existente == null) {
+                // O conflito pode ter ocorrido por outro índice.
+                // Nesse caso não devemos ocultar o erro original.
+                throw erro;
+            }
+
+            return fromDocument(existente);
+        }
     }
+
 
     // Método auxiliar para retornar uma cópia de um documento (De DosePrevista) -> usado acima
     // Converte um documento do MongoDB para um objeto DosePrevista
@@ -253,4 +306,80 @@ public class MongoPlannedDoseRepository implements PlannedDoseRepository{
         return Math.toIntExact(collection.countDocuments()); // o método usado, ao contrário de um cast simples,
         // lança uma exceção caso o valor não caiba em um int
     }
+
+    // Cancelamento por tratamento
+    @Override
+    public long cancelScheduledForTreatmentFrom(
+            String userId,
+            String treatmentId,
+            Instant inicio) {
+
+        if (userId == null || userId.isBlank()
+                || treatmentId == null || treatmentId.isBlank()
+                || inicio == null) {
+            throw new IllegalArgumentException("Usuário, tratamento e instante devem ser válidos");
+        }
+
+        // Seleciona somente as ocorrências agendadas
+        // do tratamento a partir do instante informado.
+        Document filtro = new Document("userId", userId)
+                .append("treatmentId", treatmentId)
+                .append("status", ScheduleStatus.SCHEDULED.name())
+                .append("scheduledAt", new Document("$gte", limiteMongo(inicio)));
+
+        Document atualizacao = new Document("$set",
+                new Document("status", ScheduleStatus.CANCELLED.name()));
+
+        // Atualiza todos os documentos que correspondem ao filtro
+        // e retorna a quantidade de documentos modificados.
+        return collection.updateMany(filtro, atualizacao).getModifiedCount();
+    }
+
+
+    // Cancelamento por versão de cronograma
+    @Override
+    public long cancelScheduledForMedicationVersionFrom(
+            String userId,
+            String treatmentId,
+            String medicationInUseId,
+            int scheduleVersion,
+            Instant inicio) {
+
+        if (userId == null || userId.isBlank()
+                || treatmentId == null || treatmentId.isBlank()
+                || medicationInUseId == null || medicationInUseId.isBlank()
+                || scheduleVersion < 1 || inicio == null) {
+            throw new IllegalArgumentException("Dados de cancelamento inválidos");
+        }
+
+        // Restringe o cancelamento à versão informada.
+        // Outras versões e medicamentos não devem ser afetados.
+        Document filtro = new Document("userId", userId)
+                .append("treatmentId", treatmentId)
+                .append("medicationInUseId", medicationInUseId)
+                .append("scheduleVersion", scheduleVersion)
+                .append("status", ScheduleStatus.SCHEDULED.name())
+                .append("scheduledAt", new Document("$gte", limiteMongo(inicio)));
+
+        Document atualizacao = new Document("$set",
+                new Document("status", ScheduleStatus.CANCELLED.name()));
+
+        return collection.updateMany(filtro, atualizacao).getModifiedCount();
+    }
+
+
+    // O MongoDB armazena instantes com precisão de milissegundos.
+    // Arredonda o limite para cima quando houver nanossegundos,
+    // evitando cancelar uma ocorrência anterior ao instante informado.
+    private Date limiteMongo(Instant instante) {
+
+        Instant limite = instante.truncatedTo(ChronoUnit.MILLIS);
+
+        if (instante.isAfter(limite)) {
+            limite = limite.plusMillis(1);
+        }
+
+        return Date.from(limite);
+    }
+
 }

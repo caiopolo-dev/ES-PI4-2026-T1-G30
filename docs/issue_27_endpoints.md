@@ -128,7 +128,7 @@ saveVersionedUpdate() grava medicamento e versões juntos, com um único comando
 MongoDB e um incremento de revision, usando updateWithSchedules().
 
 O PUT chama esse fluxo quando recebe validFrom. Cada versão persiste
-quantityPerAdministrationSnapshot e unitSnapshot no próprio cronograma, sem
+quantitySnapshot e unitSnapshot no próprio cronograma, sem
 repository ou coleção paralela. A versão encerrada mantém os valores anteriores;
 a nova recebe os valores solicitados. As cópias do modelo, a leitura BSON e as
 alterações posteriores de horário preservam esses campos.
@@ -146,12 +146,20 @@ histórica continua desconhecida; não há reconstrução automática do passado
 
 Essa é a estratégia implementada nesta branch para a integração #27/#28; a
 implementação não representa confirmação de revisão conjunta pelos colegas.
-O fluxo não gera, cancela ou altera doses previstas. Cronogramas legados sem
-início de vigência conhecido não são substituídos inventando datas históricas.
+Na integração com a develop a9c36b4, foi adotado o modelo quantitySnapshot e
+withPosologySnapshot() já utilizado pelo módulo de doses. O repository também
+lê o antigo nome quantityPerAdministrationSnapshot, mas grava somente o nome
+quantitySnapshot, sem duplicar campos no domínio.
+
+Foi preservada a reconciliação de doses existente na develop: quando os serviços
+recebem DoseGenerationService, delegam a ele a atualização das ocorrências após
+a gravação. Essa implementação veio da develop; não foi reescrita nesta resolução.
+Cronogramas legados sem início de vigência conhecido não são substituídos
+inventando datas históricas.
 
 ## Testes e execução
 
-Última execução: **275 testes, zero falhas, zero erros e zero ignorados**, com
+Última execução após integrar a develop: **348 testes, zero falhas, zero erros e zero ignorados**, com
 MongoDB local. Atlas não foi utilizado. As falhas antigas de conexão não aparecem
 nesta base atualizada; os resultados anteriores foram substituídos por esta rodada.
 
@@ -195,6 +203,6 @@ testes podem ser ignorados; isso não equivale a aprovação.
 Para concluir formalmente: confirmar os contratos pendentes com a equipe e
 coordenar a validação de ativação com o responsável pela #26. O endpoint de
 edição versionada já está conectado e testado. A integração do gerador com os
-snapshots e a política para doses futuras materializadas pertencem ao módulo de
-doses; não foram implementadas nesta alteração.
+snapshots e a reconciliação pertencem ao módulo de doses, cuja implementação
+presente na develop foi preservada nesta resolução.
 **A #27 não deve ser encerrada como concluída apenas porque a suíte passou.**
