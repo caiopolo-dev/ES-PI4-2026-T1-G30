@@ -6,15 +6,76 @@ import backend.models.MedicamentoEmUso;
 import backend.repositories.MedicationInUseRepository;
 import java.util.List;
 import java.util.Objects;
+import java.time.Instant;
 
 /** Operacoes de medicamentos vinculados ao titular autenticado. */
 public final class MedicationInUseService {
     private final MedicationInUseRepository repository;
     private final TreatmentMedicationRules treatmentRules;
+    private final ScheduleService schedules;
 
     public MedicationInUseService(MedicationInUseRepository repository, TreatmentMedicationRules treatmentRules) {
+        this(repository, treatmentRules, null);
+    }
+
+    public MedicationInUseService(MedicationInUseRepository repository, TreatmentMedicationRules treatmentRules,
+            ScheduleService schedules) {
         this.repository = Objects.requireNonNull(repository);
         this.treatmentRules = Objects.requireNonNull(treatmentRules);
+        this.schedules = schedules;
+    }
+
+    // Resultado de preparacao, sem gravacao. Mantem os dados anteriores para a integracao da persistencia.
+    public record PreparedMedicationChange(MedicamentoEmUso previous, MedicamentoEmUso updated, Instant validFrom) {}
+
+    public PreparedMedicationChange prepareVersionedUpdate(AuthContext context, String treatmentId, String medicationId,
+            String name, String dose, Integer quantity, String unit, String notes, long expectedRevision, Instant validFrom) {
+        if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) { throw new IllegalArgumentException("Revisao invalida."); }
+        Objects.requireNonNull(validFrom, "Inicio de vigencia obrigatorio.");
+        if (validFrom.isBefore(Instant.now())) { throw new IllegalArgumentException("A mudanca nao pode alterar o passado."); }
+        MedicamentoEmUso previous = find(context, treatmentId, medicationId);
+        if (previous.getRevision() != expectedRevision || !previous.isActive()) {
+            throw new MedicationOperationConflictException("Medicamento alterado ou inativo.");
+        }
+        var updated = new MedicamentoEmUso(previous.getId(), name, dose, quantity, unit, notes,
+            true, previous.getSchedules(), previous.getRevision());
+        treatmentRules.validateUpdate(context, treatmentId, updated);
+        if (Objects.equals(previous.getQuantity(), updated.getQuantity())
+                && Objects.equals(previous.getUnit(), updated.getUnit())) {
+            throw new IllegalArgumentException("Nao houve alteracao de quantidade ou unidade.");
+        }
+        if (schedules == null) { throw new MedicationOperationConflictException("Servico de cronogramas nao conectado."); }
+        try {
+            previous.validateForActivation();
+            updated.validateForActivation();
+            var current = previous.getActiveSchedule().orElseThrow(
+                () -> new MedicationOperationConflictException("Medicamento sem cronograma ativo."));
+            if (current.getValidFrom() == null || !validFrom.isAfter(current.getValidFrom())) {
+                throw new MedicationOperationConflictException("Nova vigencia deve ser posterior ao inicio conhecido da versao atual.");
+            }
+            // Reutiliza o versionamento da #28 sem duplicar suas regras ou persistir separadamente.
+            var history = schedules.prepararTransicao(context, treatmentId, medicationId, current, validFrom);
+            var prepared = new MedicamentoEmUso(updated.getId(), updated.getName(), updated.getDose(), updated.getQuantity(),
+                updated.getUnit(), updated.getObservations(), true, history, expectedRevision);
+            return new PreparedMedicationChange(previous, prepared, validFrom);
+        } catch (MedicationOperationConflictException conflict) {
+            throw conflict;
+        } catch (IllegalStateException conflict) {
+            throw new MedicationOperationConflictException("Historico nao permite preparar esta alteracao.");
+        }
+    }
+
+    public MedicamentoEmUso saveVersionedUpdate(AuthContext context, String treatmentId, String medicationId,
+            String name, String dose, Integer quantity, String unit, String notes, long expectedRevision, Instant validFrom) {
+        var change = prepareVersionedUpdate(context, treatmentId, medicationId, name, dose, quantity, unit,
+            notes, expectedRevision, validFrom);
+        var updated = change.updated();
+        if (!repository.updateWithSchedules(treatmentId, context.userId(), updated)) {
+            find(context, treatmentId, medicationId);
+            treatmentRules.validateUpdate(context, treatmentId, updated);
+            throw new MedicationOperationConflictException("Medicamento alterado durante a gravacao conjunta.");
+        }
+        return updated.withRevision(expectedRevision + 1);
     }
 
     public MedicamentoEmUso add(AuthContext context, String treatmentId, String name, String dose,
@@ -23,6 +84,8 @@ public final class MedicationInUseService {
         var medication = new MedicamentoEmUso(null, name, dose, quantity, unit, notes, true, List.of());
         treatmentRules.validateAddition(context, treatmentId, medication);
         if (!repository.add(treatmentId, context.userId(), medication)) {
+            // Revalida para distinguir encerramento concorrente de recurso inacessivel.
+            treatmentRules.validateAddition(context, treatmentId, medication);
             throw new ResourceNotFoundException();
         }
         return medication;

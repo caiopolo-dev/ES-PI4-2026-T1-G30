@@ -17,6 +17,208 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MedicationInUseIntegrationTest {
     @Test
+    @EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
+    void savesMedicationAndPreparedSchedulesTogether() throws Exception {
+        String database = "dosecerta_test_med_atomic_" + UUID.randomUUID().toString().replace("-", "");
+        try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
+            try {
+                var treatments = new MongoTreatmentRepository(connection.getDatabase());
+                var treatmentService = new backend.services.TreatmentService(treatments);
+                var owner = new backend.auth.AuthContext("a");
+                var draft = treatmentService.createDraft(owner, "Demo", null, java.time.LocalDate.parse("2026-11-19"), null);
+                draft.addMedication(medication("m", 1));
+                draft.addMedication(medication("other", 1));
+                treatments.update(draft);
+                var schedules = new backend.services.ScheduleService(treatments);
+                var initial = new backend.models.CronogramaDose(List.of("08:00"), "2026-11-19", "UTC");
+                schedules.salvar(owner, draft.getId(), "m", initial, java.time.Instant.parse("2026-11-19T00:00:00Z"), 0);
+                var repository = new MongoMedicationInUseRepository(connection.getCollection("treatments"));
+                var service = new backend.services.MedicationInUseService(repository,
+                    new backend.services.DefaultTreatmentMedicationRules(treatmentService), schedules);
+                var effective = java.time.Instant.now().plusSeconds(86400);
+                var change = service.prepareVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 2,
+                    "mL", "Alterado", 1, effective);
+                var collection = connection.getCollection("treatments");
+                var before = collection.find().first();
+                assertFalse(repository.updateWithSchedules(draft.getId(), "b", change.updated()));
+                assertFalse(repository.updateWithSchedules(draft.getId(), "a", change.updated().withRevision(0)));
+                assertEquals(before, collection.find().first());
+                var other = repository.find(draft.getId(), "a", "other").orElseThrow();
+                var saved = service.saveVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 2,
+                    "mL", "Alterado", 1, effective);
+                var restored = repository.find(draft.getId(), "a", "m").orElseThrow();
+                assertEquals(saved, restored);
+                assertEquals(2L, restored.getRevision());
+                assertEquals(2, restored.getQuantity());
+                assertEquals("mL", restored.getUnit());
+                assertEquals(2, restored.getSchedules().size());
+                assertEquals(effective, restored.getScheduleByVersion(1).orElseThrow().getValidTo());
+                assertEquals(effective, restored.getScheduleByVersion(2).orElseThrow().getValidFrom());
+                assertEquals(other, repository.find(draft.getId(), "a", "other").orElseThrow());
+                var after = collection.find().first();
+                assertFalse(repository.updateWithSchedules(draft.getId(), "a", change.updated()));
+                assertEquals(after, collection.find().first());
+                var nextEffective = effective.plusSeconds(86400);
+                var quantityChange = service.prepareVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 3,
+                    "mL", null, 2, nextEffective);
+                var unitChange = service.prepareVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 2,
+                    "unidade", null, 2, nextEffective);
+                var start = new CountDownLatch(1);
+                boolean quantityWon;
+                boolean unitWon;
+                try (var executor = Executors.newFixedThreadPool(2)) {
+                    var first = executor.submit(() -> { start.await();
+                        return repository.updateWithSchedules(draft.getId(), "a", quantityChange.updated()); });
+                    var second = executor.submit(() -> { start.await();
+                        return repository.updateWithSchedules(draft.getId(), "a", unitChange.updated()); });
+                    start.countDown();
+                    quantityWon = first.get(10, TimeUnit.SECONDS);
+                    unitWon = second.get(10, TimeUnit.SECONDS);
+                }
+                assertNotEquals(quantityWon, unitWon);
+                var concurrent = repository.find(draft.getId(), "a", "m").orElseThrow();
+                var winner = quantityWon ? quantityChange.updated() : unitChange.updated();
+                assertEquals(winner.withRevision(3), concurrent);
+                assertEquals(3, concurrent.getSchedules().size());
+                assertEquals(restored.getScheduleByVersion(1), concurrent.getScheduleByVersion(1));
+                assertEquals(nextEffective, concurrent.getScheduleByVersion(2).orElseThrow().getValidTo());
+                assertEquals(other, repository.find(draft.getId(), "a", "other").orElseThrow());
+                collection.updateOne(new Document("_id", draft.getId()), new Document("$set", new Document("status", "CLOSED")));
+                var closed = collection.find().first();
+                assertFalse(repository.updateWithSchedules(draft.getId(), "a", concurrent));
+                assertEquals(closed, collection.find().first());
+            } finally { connection.getDatabase().drop(); }
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
+    void realTreatmentLifecycleWorksThroughHttp() throws Exception {
+        String database = "dosecerta_test_med_lifecycle_" + UUID.randomUUID().toString().replace("-", "");
+        try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
+            try {
+                var treatments = new MongoTreatmentRepository(connection.getDatabase());
+                var treatmentService = new backend.services.TreatmentService(treatments);
+                var medicationRepository = new MongoMedicationInUseRepository(connection.getCollection("treatments"));
+                var service = new backend.services.MedicationInUseService(medicationRepository,
+                    new backend.services.DefaultTreatmentMedicationRules(treatmentService));
+                var sessions = new backend.services.SessionService(
+                    new backend.repositories.MongoSessionRepository(connection.getCollection("auth_sessions")));
+                String token = sessions.create("a");
+                String foreignToken = sessions.create("b");
+                var extractor = new backend.services.BearerTokenExtractor();
+                var router = new backend.router.Router(request -> extractor.extract(request).flatMap(sessions::resolve)
+                    .map(session -> session.getUserId()));
+                var treatmentHandler = new backend.handlers.TreatmentHandler(treatmentService);
+                router.register("POST", "/treatments", treatmentHandler);
+                router.register("GET", "/treatments/{id}", treatmentHandler);
+                router.register("POST", "/treatments/{id}/activate", treatmentHandler);
+                router.register("POST", "/treatments/{id}/close", treatmentHandler);
+                new backend.handlers.MedicationInUseHandler(service).registerRoutes(router);
+                int port;
+                try (var available = new java.net.ServerSocket(0)) { port = available.getLocalPort(); }
+                var server = new backend.server.Servidor(port, router);
+                Thread thread = new Thread(server::aceitadorDeConexao);
+                thread.setDaemon(true);
+                thread.start();
+                try {
+                    var client = java.net.http.HttpClient.newHttpClient();
+                    for (int attempt = 0; ; attempt++) {
+                        try { sendHttp(client, port, "POST", "/treatments", null, "{}"); break; }
+                        catch (java.io.IOException error) { if (attempt == 29) { throw error; } Thread.sleep(100); }
+                    }
+                    var created = sendHttp(client, port, "POST", "/treatments", token,
+                        "{\"name\":\"Demo\",\"startDate\":\"2026-11-19\"}");
+                    assertEquals(201, created.statusCode());
+                    String id = Document.parse(created.body()).getString("id");
+                    String path = "/treatments/" + id;
+                    String meds = path + "/medications";
+                    String body = "{\"name\":\"Demo\",\"informedDose\":\"50 mg\",\"quantityPerAdministration\":1,\"unit\":\"comprimido\"}";
+                    assertEquals(401, sendHttp(client, port, "POST", meds, null, body).statusCode());
+                    assertEquals(404, sendHttp(client, port, "POST", meds, foreignToken, body).statusCode());
+                    var added = sendHttp(client, port, "POST", meds, token, body);
+                    assertEquals(201, added.statusCode());
+                    String medicationId = Document.parse(added.body()).getString("id");
+                    String item = meds + "/" + medicationId;
+                    var incomplete = sendHttp(client, port, "POST", meds, token,
+                        "{\"name\":\"Rascunho\",\"informedDose\":\"10 mg\"}");
+                    assertEquals(201, incomplete.statusCode());
+                    assertEquals(204, sendHttp(client, port, "DELETE", meds + "/" +
+                        Document.parse(incomplete.body()).getString("id"), token, "").statusCode());
+                    // Cronograma como dado de teste; o versionamento sera integrado nas proximas etapas.
+                    var treatment = treatments.findById(id).orElseThrow();
+                    var medication = treatment.findMedicationById(medicationId).orElseThrow();
+                    medication.addScheduleVersion(new backend.models.CronogramaDose(
+                        List.of("08:00"), "2026-11-19", "America/Sao_Paulo"));
+                    treatment.addMedication(medication);
+                    treatments.update(treatment);
+                    assertEquals(200, sendHttp(client, port, "POST", path + "/activate", token, "").statusCode());
+                    assertEquals(409, sendHttp(client, port, "POST", meds, token,
+                        "{\"name\":\"Incompleto\",\"informedDose\":\"10 mg\"}").statusCode());
+                    String edit = body.substring(0, body.length() - 1) + ",\"revision\":0,\"notes\":\"Editado\"}";
+                    assertEquals(404, sendHttp(client, port, "PUT", item, foreignToken, edit).statusCode());
+                    assertEquals(200, sendHttp(client, port, "PUT", item, token, edit).statusCode());
+                    assertEquals(409, sendHttp(client, port, "PUT", item, token, edit).statusCode());
+                    assertEquals(409, sendHttp(client, port, "DELETE", item, token, "").statusCode());
+                    var consulted = sendHttp(client, port, "GET", path, token, "");
+                    assertEquals(200, consulted.statusCode());
+                    var returned = Document.parse(consulted.body()).getList("medications", Document.class).stream()
+                        .filter(m -> medicationId.equals(m.getString("id"))).findFirst().orElseThrow();
+                    assertEquals(1L, ((Number) returned.get("revision")).longValue());
+                    assertEquals("comprimido", returned.getString("unit"));
+                    assertTrue(returned.getBoolean("active"));
+                    assertEquals("Editado", returned.getString("observations"));
+                    assertEquals(404, sendHttp(client, port, "GET", path, foreignToken, "").statusCode());
+                    assertEquals(200, sendHttp(client, port, "POST", path + "/close", token, "").statusCode());
+                    var collection = connection.getCollection("treatments");
+                    Document before = collection.find().first();
+                    assertEquals(409, sendHttp(client, port, "POST", meds, token, body).statusCode());
+                    assertEquals(409, sendHttp(client, port, "PUT", item, token, edit.replace("\"revision\":0", "\"revision\":1")).statusCode());
+                    assertEquals(409, sendHttp(client, port, "DELETE", item, token, "").statusCode());
+                    assertEquals(before, collection.find().first());
+                    assertEquals(200, sendHttp(client, port, "GET", path, token, "").statusCode());
+                    try (var reopened = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
+                        var restored = new MongoMedicationInUseRepository(reopened.getCollection("treatments"))
+                            .find(id, "a", medicationId).orElseThrow();
+                        assertEquals(1, restored.getSchedules().size());
+                        assertEquals(1L, restored.getRevision());
+                    }
+                } finally { server.parar(); thread.join(3000); assertFalse(thread.isAlive()); }
+            } finally { connection.getDatabase().drop(); }
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
+    void stateChangesCannotBypassMedicationWriteRules() {
+        String database = "dosecerta_test_med_states_" + UUID.randomUUID().toString().replace("-", "");
+        try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
+            try {
+                var collection = connection.getCollection("treatments");
+                collection.insertOne(new Document("_id", "t").append("userId", "a").append("status", "DRAFT")
+                    .append("status", "DRAFT").append("name", "Demo").append("medications", List.of()));
+                var repository = new MongoMedicationInUseRepository(collection);
+                assertTrue(repository.add("t", "a", medication("m", 1)));
+                collection.updateOne(new Document("_id", "t"), new Document("$set", new Document("status", "CLOSED")));
+                var before = collection.find().first();
+                assertFalse(repository.add("t", "a", medication("other", 1)));
+                assertFalse(repository.update("t", "a", medication("m", 2)));
+                assertFalse(repository.deactivate("t", "a", "m", 0, 0));
+                assertEquals(before, collection.find().first());
+                collection.updateOne(new Document("_id", "t"), new Document("$set", new Document("status", "ACTIVE")));
+                assertFalse(repository.add("t", "a", new MedicamentoEmUso("new", "Demo", "50 mg", null, null, null, true, List.of())));
+                assertFalse(repository.deactivate("t", "a", "m", 0, 0));
+                assertTrue(repository.add("t", "a", medication("other", 1)));
+                // Ter outro medicamento sem cronograma nao basta para desativar o primeiro.
+                assertFalse(repository.deactivate("t", "a", "m", 0, 0));
+                collection.updateOne(new Document("_id", "t"), new Document("$set",
+                    new Document("medications.1.schedules", List.of(new Document("active", true)))));
+                assertTrue(repository.deactivate("t", "a", "m", 0, 0));
+            } finally { connection.getDatabase().drop(); }
+        }
+    }
+
+    @Test
     void medicationRoutesDelegateOnlyWithAuthenticatedContext() {
         var service = org.mockito.Mockito.mock(backend.services.MedicationInUseService.class);
         var router = new backend.router.Router(request -> java.util.Optional.of("a"));
@@ -89,7 +291,7 @@ class MedicationInUseIntegrationTest {
         try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
             try {
                 var collection = connection.getCollection("treatments");
-                collection.insertOne(new Document("_id", "t").append("userId", "a")
+                collection.insertOne(new Document("_id", "t").append("userId", "a").append("status", "DRAFT")
                     .append("name", "Demo").append("medications", List.of()));
                 var repository = new MongoMedicationInUseRepository(collection);
                 var deny = new java.util.concurrent.atomic.AtomicBoolean();
@@ -186,7 +388,7 @@ class MedicationInUseIntegrationTest {
         try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
             try {
                 var collection = connection.getCollection("treatments");
-                collection.insertOne(new Document("_id", "t").append("userId", "a").append("name", "Demo")
+                collection.insertOne(new Document("_id", "t").append("userId", "a").append("status", "DRAFT").append("name", "Demo")
                     .append("medications", List.of()));
                 var repository = new MongoMedicationInUseRepository(collection);
                 assertTrue(repository.add("t", "a", medication("m1", 1)));
@@ -221,7 +423,7 @@ class MedicationInUseIntegrationTest {
                 }
                 assertEquals(2, collection.find().first().getList("medications", Document.class).size());
                 assertTrue(repository.find("t", "a", "m1").orElseThrow().getSchedules().isEmpty());
-                collection.insertOne(new Document("_id", "legacy").append("userId", "a").append("medications",
+                collection.insertOne(new Document("_id", "legacy").append("userId", "a").append("status", "DRAFT").append("medications",
                     List.of(new Document("id", "old").append("name", "Demo").append("dose", "50 mg").append("quantity", 1)
                         .append("schedules", List.of()))));
                 assertFalse(repository.deactivate("legacy", "a", "old", 0, 1));
@@ -300,7 +502,7 @@ class MedicationInUseIntegrationTest {
         try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
             try {
                 var collection = connection.getCollection("treatments");
-                collection.insertOne(new Document("_id", "t").append("userId", "a")
+                collection.insertOne(new Document("_id", "t").append("userId", "a").append("status", "DRAFT")
                     .append("name", "Demo").append("medications", List.of()));
                 var repository = new MongoMedicationInUseRepository(collection);
                 assertTrue(repository.add("t", "a", medication("m1", 1)));
