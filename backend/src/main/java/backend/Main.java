@@ -40,6 +40,13 @@ public class Main {
             DoseRecordRepository doseRecordRepository =
                     new MongoDoseRecordRepository(mongoConnection.getDatabase());
 
+            // issue 32 - Reutiliza os repositórios e a autorização de titularidade existentes.
+            DoseAccessService doseAccessService =
+                    new DoseAccessService(plannedDoseRepository, doseRecordRepository);
+            DoseService doseService =
+                    new DoseService(doseRecordRepository, doseAccessService);
+            DoseRecordHandler doseRecordHandler = new DoseRecordHandler(doseService);
+
             // Configuração dos serviços de agenda e adesão
             AgendaService agendaService =
                     new AgendaService(plannedDoseRepository, doseRecordRepository);
@@ -87,10 +94,9 @@ public class Main {
             SessionService sessionService = new SessionService(sessionRepository);
             
             BearerTokenExtractor bearerTokenExtractor = new BearerTokenExtractor();
+
             // Usa a mesma sessao do login nas consultas privadas.
-            SessionAuthenticator sessionAuthenticator = request -> bearerTokenExtractor.extract(request)
-                .flatMap(sessionService::resolve)
-                .map(session -> session.getUserId());
+            SessionAuthenticator sessionAuthenticator = request -> bearerTokenExtractor.extract(request).flatMap(sessionService::resolve).map(session -> session.getUserId());
             AgendaHandler agendaHandler = new AgendaHandler(agendaService);
             AdherenceHandler adherenceHandler = new AdherenceHandler(adherenceService);
 
@@ -105,6 +111,9 @@ public class Main {
             router.register("GET", "/health", new HealthHandler());
             router.register("GET", "/medications", medicationHandler);
             router.register("GET", "/doses", agendaHandler);
+            // issue 32
+            router.register("PUT", "/doses/{id}/record", doseRecordHandler);
+
             router.register("GET", "/adherence/summary", adherenceHandler);
             router.register("POST", "/auth/register", authHandler);
             router.register("POST", "/auth/login", loginHandler);
