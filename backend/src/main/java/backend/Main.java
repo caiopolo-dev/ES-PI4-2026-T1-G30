@@ -68,13 +68,13 @@ public class Main {
                     new MongoMedicationInUseRepository(mongoConnection.getCollection("treatments"));
             TreatmentMedicationRules treatmentMedicationRules =
                     new DefaultTreatmentMedicationRules(treatmentService);
+            ScheduleService scheduleService = new ScheduleService(treatmentRepository);
             MedicationInUseService medicationInUseService =
-                    new MedicationInUseService(medicationInUseRepository, treatmentMedicationRules);
+                    new MedicationInUseService(medicationInUseRepository, treatmentMedicationRules, scheduleService);
             MedicationInUseHandler medicationInUseHandler =
                     new MedicationInUseHandler(medicationInUseService);
 
             // issue 28 - Compartilha o mesmo repositório MongoDB com o serviço de cronogramas.
-            ScheduleService scheduleService = new ScheduleService(treatmentRepository);
             ScheduleHandler scheduleHandler = new ScheduleHandler(scheduleService);
 
             AuthService authService = new AuthService(userRepository);

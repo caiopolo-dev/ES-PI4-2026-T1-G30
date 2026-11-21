@@ -13,6 +13,42 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MedicationInUseServiceTest {
     @Test
+    void preparesQuantityChangeThroughScheduleServiceWithoutWriting() {
+        var repository = new TestRepository();
+        var schedules = org.mockito.Mockito.mock(backend.services.ScheduleService.class);
+        var effective = java.time.Instant.now().plusSeconds(86400);
+        var previousSchedule = new CronogramaDose(List.of("08:00"), "2026-11-19", "UTC")
+            .withValidity(effective.minusSeconds(172800), null);
+        repository.add("t", "a", new MedicamentoEmUso("m", "Demo", "50 mg", 1,
+            "comprimido", null, true, List.of(previousSchedule)));
+        var history = List.of(previousSchedule.withActive(false).withValidity(previousSchedule.getValidFrom(), effective),
+            previousSchedule.withVersion(2).withValidity(effective, null));
+        org.mockito.Mockito.when(schedules.prepararTransicao(a, "t", "m", previousSchedule, effective)).thenReturn(history);
+        var service = new MedicationInUseService(repository, new TestRules(), schedules);
+        int writes = repository.writes;
+        var prepared = service.prepareVersionedUpdate(a, "t", "m", "Demo", "50 mg", 2, "mL", null, 0, effective);
+        assertEquals(1, prepared.previous().getQuantity());
+        assertEquals("comprimido", prepared.previous().getUnit());
+        assertEquals(2, prepared.updated().getQuantity());
+        assertEquals("mL", prepared.updated().getUnit());
+        assertEquals(history, prepared.updated().getSchedules());
+        assertEquals(0L, prepared.updated().getRevision());
+        assertEquals(effective, prepared.validFrom());
+        assertEquals(List.of(previousSchedule), service.find(a, "t", "m").getSchedules());
+        assertEquals(1, service.find(a, "t", "m").getQuantity());
+        assertEquals(writes, repository.writes);
+        org.mockito.Mockito.verify(schedules).prepararTransicao(a, "t", "m", previousSchedule, effective);
+        assertThrows(backend.services.MedicationOperationConflictException.class,
+            () -> service.prepareVersionedUpdate(a, "t", "m", "Demo", "50 mg", 2, "mL", null, 1, effective));
+        assertThrows(ResourceNotFoundException.class,
+            () -> service.prepareVersionedUpdate(b, "t", "m", "Demo", "50 mg", 2, "mL", null, 0, effective));
+        assertThrows(IllegalArgumentException.class,
+            () -> service.prepareVersionedUpdate(a, "t", "m", "Demo", "50 mg", 2, "mL", null, 0,
+                java.time.Instant.now().minusSeconds(60)));
+        assertEquals(writes, repository.writes);
+    }
+
+    @Test
     void treatmentRulesUseRealIdentityAndStates() {
         var repository = org.mockito.Mockito.mock(backend.repositories.TreatmentRepository.class);
         var owner = new AuthContext("owner");

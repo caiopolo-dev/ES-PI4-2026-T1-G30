@@ -18,6 +18,81 @@ import static org.junit.jupiter.api.Assertions.*;
 class MedicationInUseIntegrationTest {
     @Test
     @EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
+    void savesMedicationAndPreparedSchedulesTogether() throws Exception {
+        String database = "dosecerta_test_med_atomic_" + UUID.randomUUID().toString().replace("-", "");
+        try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {
+            try {
+                var treatments = new MongoTreatmentRepository(connection.getDatabase());
+                var treatmentService = new backend.services.TreatmentService(treatments);
+                var owner = new backend.auth.AuthContext("a");
+                var draft = treatmentService.createDraft(owner, "Demo", null, java.time.LocalDate.parse("2026-11-19"), null);
+                draft.addMedication(medication("m", 1));
+                draft.addMedication(medication("other", 1));
+                treatments.update(draft);
+                var schedules = new backend.services.ScheduleService(treatments);
+                var initial = new backend.models.CronogramaDose(List.of("08:00"), "2026-11-19", "UTC");
+                schedules.salvar(owner, draft.getId(), "m", initial, java.time.Instant.parse("2026-11-19T00:00:00Z"), 0);
+                var repository = new MongoMedicationInUseRepository(connection.getCollection("treatments"));
+                var service = new backend.services.MedicationInUseService(repository,
+                    new backend.services.DefaultTreatmentMedicationRules(treatmentService), schedules);
+                var effective = java.time.Instant.now().plusSeconds(86400);
+                var change = service.prepareVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 2,
+                    "mL", "Alterado", 1, effective);
+                var collection = connection.getCollection("treatments");
+                var before = collection.find().first();
+                assertFalse(repository.updateWithSchedules(draft.getId(), "b", change.updated()));
+                assertFalse(repository.updateWithSchedules(draft.getId(), "a", change.updated().withRevision(0)));
+                assertEquals(before, collection.find().first());
+                var other = repository.find(draft.getId(), "a", "other").orElseThrow();
+                var saved = service.saveVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 2,
+                    "mL", "Alterado", 1, effective);
+                var restored = repository.find(draft.getId(), "a", "m").orElseThrow();
+                assertEquals(saved, restored);
+                assertEquals(2L, restored.getRevision());
+                assertEquals(2, restored.getQuantity());
+                assertEquals("mL", restored.getUnit());
+                assertEquals(2, restored.getSchedules().size());
+                assertEquals(effective, restored.getScheduleByVersion(1).orElseThrow().getValidTo());
+                assertEquals(effective, restored.getScheduleByVersion(2).orElseThrow().getValidFrom());
+                assertEquals(other, repository.find(draft.getId(), "a", "other").orElseThrow());
+                var after = collection.find().first();
+                assertFalse(repository.updateWithSchedules(draft.getId(), "a", change.updated()));
+                assertEquals(after, collection.find().first());
+                var nextEffective = effective.plusSeconds(86400);
+                var quantityChange = service.prepareVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 3,
+                    "mL", null, 2, nextEffective);
+                var unitChange = service.prepareVersionedUpdate(owner, draft.getId(), "m", "Demo", "50 mg", 2,
+                    "unidade", null, 2, nextEffective);
+                var start = new CountDownLatch(1);
+                boolean quantityWon;
+                boolean unitWon;
+                try (var executor = Executors.newFixedThreadPool(2)) {
+                    var first = executor.submit(() -> { start.await();
+                        return repository.updateWithSchedules(draft.getId(), "a", quantityChange.updated()); });
+                    var second = executor.submit(() -> { start.await();
+                        return repository.updateWithSchedules(draft.getId(), "a", unitChange.updated()); });
+                    start.countDown();
+                    quantityWon = first.get(10, TimeUnit.SECONDS);
+                    unitWon = second.get(10, TimeUnit.SECONDS);
+                }
+                assertNotEquals(quantityWon, unitWon);
+                var concurrent = repository.find(draft.getId(), "a", "m").orElseThrow();
+                var winner = quantityWon ? quantityChange.updated() : unitChange.updated();
+                assertEquals(winner.withRevision(3), concurrent);
+                assertEquals(3, concurrent.getSchedules().size());
+                assertEquals(restored.getScheduleByVersion(1), concurrent.getScheduleByVersion(1));
+                assertEquals(nextEffective, concurrent.getScheduleByVersion(2).orElseThrow().getValidTo());
+                assertEquals(other, repository.find(draft.getId(), "a", "other").orElseThrow());
+                collection.updateOne(new Document("_id", draft.getId()), new Document("$set", new Document("status", "CLOSED")));
+                var closed = collection.find().first();
+                assertFalse(repository.updateWithSchedules(draft.getId(), "a", concurrent));
+                assertEquals(closed, collection.find().first());
+            } finally { connection.getDatabase().drop(); }
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "mongo.integration", matches = "true")
     void realTreatmentLifecycleWorksThroughHttp() throws Exception {
         String database = "dosecerta_test_med_lifecycle_" + UUID.randomUUID().toString().replace("-", "");
         try (var connection = new MongoConnection("mongodb://127.0.0.1:27017", database)) {

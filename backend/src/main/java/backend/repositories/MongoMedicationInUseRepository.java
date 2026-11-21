@@ -52,12 +52,26 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
 
     @Override
     public boolean update(String treatmentId, String userId, MedicamentoEmUso medication) {
+        return updateFields(treatmentId, userId, medication, false);
+    }
+
+    @Override
+    public boolean updateWithSchedules(String treatmentId, String userId, MedicamentoEmUso medication) {
+        return updateFields(treatmentId, userId, medication, true);
+    }
+
+    private boolean updateFields(String treatmentId, String userId, MedicamentoEmUso medication, boolean withSchedules) {
         Objects.requireNonNull(medication);
         Document changes = new Document();
         for (var field : fields(medication).entrySet()) {
             changes.append("medications.$." + field.getKey(), field.getValue());
         }
-        // Preserva ID, estado e todos os cronogramas armazenados.
+        if (withSchedules) {
+            // Reutiliza o formato de persistencia da #28.
+            changes.append("medications.$.schedules", medication.getSchedules().stream()
+                .map(MongoTreatmentRepository::toScheduleDocument).toList());
+        }
+        // Preserva ID e estado; as versoes so mudam no fluxo de gravacao conjunta.
         Bson current = Filters.and(Filters.eq("id", medication.getId()), Filters.ne("active", false),
             revisionFilter(medication.getRevision()));
         Bson filter = Filters.and(owner(treatmentId, userId), editable(medication), Filters.elemMatch("medications", current));
