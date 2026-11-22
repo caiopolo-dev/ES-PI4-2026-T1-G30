@@ -49,18 +49,19 @@ public final class DoseAccessService {
     }
 
     public RegistroDeDose record(AuthContext context, String doseId, DoseAction action, Instant actualTime) {
-        DosePrevista dose = find(context, doseId);
-        if (dose.getStatus() == ScheduleStatus.CANCELLED) {
-            throw new IllegalStateException("Dose cancelada.");
+        synchronized (TreatmentMutationLock.MONITOR) {
+            DosePrevista dose = find(context, doseId);
+            if (dose.getStatus() == ScheduleStatus.CANCELLED) {
+                throw new IllegalStateException("Dose cancelada.");
+            }
+            // Nao altera registros anteriores nem aceita um ID de registro do cliente.
+            if (records.findByPlannedDoseId(dose.getId()).isPresent()) {
+                throw new IllegalStateException("Dose ja possui registro.");
+            }
+            RegistroDeDose record = new RegistroDeDose(null, dose.getId(), context.userId(),
+                    Objects.requireNonNull(action), actualTime, clock.instant());
+            return records.save(record);
         }
-        // Nao altera registros anteriores nem aceita um ID de registro do cliente.
-        if (records.findByPlannedDoseId(dose.getId()).isPresent()) {
-            throw new IllegalStateException("Dose ja possui registro.");
-        }
-        // O usuario vem da sessao e recordedAt vem do servidor; actualTime e o instante da acao informado.
-        RegistroDeDose record = new RegistroDeDose(null, dose.getId(), context.userId(),
-            Objects.requireNonNull(action), actualTime, clock.instant());
-        return records.save(record);
     }
 
     private static ResourceNotFoundException notFound() {

@@ -1,6 +1,7 @@
 package backend.http;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -12,15 +13,24 @@ public class HttpResponse {
     private final int statusCode;
     private final String reasonPhrase;
     private final Map<String, String> headers;
-    private final String body;
+    private final byte[] body;
 
     public HttpResponse(int statusCode, String reasonPhrase, String body) {
+        this(
+                statusCode,
+                reasonPhrase,
+                body != null ? body.getBytes(StandardCharsets.UTF_8) : new byte[0],
+                "application/json; charset=utf-8"
+        );
+    }
+
+    public HttpResponse(int statusCode, String reasonPhrase, byte[] body, String contentType) {
         this.statusCode = statusCode;
         this.reasonPhrase = reasonPhrase;
-        this.body = body != null ? body : "";
+        this.body = body != null ? Arrays.copyOf(body, body.length) : new byte[0];
         this.headers = new HashMap<>();
-        this.headers.put("Content-Type", "application/json; charset=utf-8");
-        this.headers.put("Content-Length", String.valueOf(this.body.getBytes(StandardCharsets.UTF_8).length));
+        this.headers.put("Content-Type", contentType);
+        this.headers.put("Content-Length", String.valueOf(this.body.length));
     }
 
     public static HttpResponse ok(String jsonBody) {
@@ -64,7 +74,11 @@ public class HttpResponse {
     }
 
     public String getBody() {
-        return body;
+        return new String(body, StandardCharsets.UTF_8);
+    }
+
+    public byte[] getBodyBytes() {
+        return Arrays.copyOf(body, body.length);
     }
 
     @Override
@@ -72,6 +86,6 @@ public class HttpResponse {
         return "HTTP/1.1 " + statusCode + " " + reasonPhrase + "\n" +
                "Content-Type: " + headers.get("Content-Type") + "\n" +
                "Content-Length: " + headers.get("Content-Length") + "\n\n" +
-               body;
+               getBody();
     }
 }
