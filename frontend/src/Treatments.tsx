@@ -4,6 +4,7 @@ import type { Medication, MedicationInput, MedicationPresentation, Treatment, Tr
 import { Badge, BottomNav, Button, Field, Header, Icon, Loading, Notice, civilDate, formatDate, localDateTime, toInstant, useAction, useResource, zone, type Navigate } from "./ui";
 import { dayNames, ScheduleEditor } from "./Schedule";
 import { MedicationPresentationSearch, presentationPackageDescription } from "./MedicationPresentationSearch";
+import type { RemindersController } from "./notifications/useWebReminders";
 
 const statuses: Record<TreatmentStatus,string> = { ACTIVE: "Ativos", DRAFT: "Rascunhos", CLOSED: "Encerrados" };
 const singular: Record<TreatmentStatus,string> = { ACTIVE: "Ativo", DRAFT: "Rascunho", CLOSED: "Encerrado" };
@@ -114,7 +115,7 @@ function MedicationForm({ treatment, medication, done, wizard = false }: { treat
 }
 
 type DetailMode = { kind: "view" | "meta" | "add" } | { kind: "schedule" | "med"; med: Medication };
-export function Detail({ id, back, resume }: { id: string; back: () => void; resume: () => void }) {
+export function Detail({ id, back, resume, reminders }: { id: string; back: () => void; resume: () => void; reminders?: RemindersController }) {
   const result = useResource(id, () => api.treatment(id));
   const [mode, setMode] = useState<DetailMode>({kind: "view"});
   const [confirm, setConfirm] = useState("");
@@ -123,19 +124,25 @@ export function Detail({ id, back, resume }: { id: string; back: () => void; res
   const t = result.data;
   const refresh = () => { setMode({kind:"view"}); setConfirm(""); result.reload(); };
   if (!t) return <div className="screen"><Header title="Detalhes do tratamento" back={back} /><main className="content"><Loading error={result.error} retry={result.reload} /></main></div>;
-  if (mode.kind === "schedule") return <ScheduleEditor treatment={t} med={mode.med} cancel={refresh} done={refresh} />;
+  if (mode.kind === "schedule") return <ScheduleEditor treatment={t} med={mode.med} reminders={reminders} cancel={refresh} done={refresh} />;
   const edit = mode.kind !== "view";
   const mutate = () => action.run(async () => {
     try {
-      if (confirm === "close") await api.close(id);
-      else await api.deactivateMedication(id, confirm);
+      if (confirm === "close") {
+        await api.close(id);
+        // Encerramento de tratamento: cancela imediatamente os lembretes futuros deste tratamento.
+        void reminders?.handleTreatmentClosed(id);
+      } else {
+        await api.deactivateMedication(id, confirm);
+        void reminders?.handleScheduleUpdated(id);
+      }
       setNotice(confirm === "close" ? "Tratamento encerrado." : "Medicamento desativado.");
     } finally { refresh(); }
   });
   return <div className="screen"><Header title="Detalhes do tratamento" back={edit ? refresh : back} /><main className="content detail-content">
     {notice && <Notice>{notice}</Notice>}{action.error && <Notice error>{action.error}</Notice>}
     <div className="detail-hero"><div><Badge tone={t.status === "ACTIVE" ? "success" : "neutral"}>{singular[t.status]}</Badge><div role="heading" aria-level={1}>{t.name || "Rascunho sem nome"}</div><p>{t.startDate ? "Início em " + formatDate(t.startDate) : "Início a definir"} · {t.endDate ? formatDate(t.endDate) : "Contínuo"}</p></div>{t.status !== "CLOSED" && !edit && <button className="icon-button raised" aria-label="Editar tratamento" onClick={() => setMode({kind:"meta"})}><Icon name="edit" /></button>}</div>
-    {mode.kind === "meta" ? <MetaForm treatment={t} readonlyPeriod={t.status === "ACTIVE"} done={refresh} advance="Salvar alterações" /> : mode.kind === "add" || mode.kind === "med" ? <MedicationForm treatment={t} medication={mode.kind === "med" ? mode.med : undefined} done={refresh} /> : <>
+    {mode.kind === "meta" ? <MetaForm treatment={t} readonlyPeriod={t.status === "ACTIVE"} done={refresh} advance="Salvar alterações" /> : mode.kind === "add" || mode.kind === "med" ? <MedicationForm treatment={t} medication={mode.kind === "med" ? mode.med : undefined} done={() => { if (t.status === "ACTIVE") void reminders?.handleScheduleUpdated(id); refresh(); }} /> : <>
     {t.status === "DRAFT" && <Button onClick={resume}>Continuar rascunho</Button>}
     <div className="section-heading"><div role="heading" aria-level={2}>Medicamentos do tratamento</div></div>
     {t.medications.map(m => <div className="detail-med-card" key={m.id}><div className="detail-med-top"><div className="medicine-icon"><Icon name="pill" /></div><div><strong>{m.name} {m.dose}</strong><span>{m.quantity ?? "—"} {m.unit} por administração · {m.active ? "Ativo" : "Inativo"}</span></div></div>
@@ -154,7 +161,7 @@ function ScheduleOverview({ tid, medication }: {tid: string; medication: Medicat
 }
 
 const steps = ["Informações", "Medicamentos", "Cronograma", "Revisão"];
-export function Wizard({ initialId, back, showDetail }: {initialId: string; back: () => void; showDetail: (id: string) => void}) {
+export function Wizard({ initialId, back, showDetail, reminders }: {initialId: string; back: () => void; showDetail: (id: string) => void; reminders?: RemindersController}) {
   const [id, setId] = useState(initialId);
   const [step, setStep] = useState(0);
   const [editing, setEditing] = useState<Medication | null>(null);
@@ -164,10 +171,15 @@ export function Wizard({ initialId, back, showDetail }: {initialId: string; back
   const t = result.data;
   if (id && !t) return <div className="screen"><Header title="Novo tratamento" back={back} /><main className="content"><Loading error={result.error} retry={result.reload} /></main></div>;
   if (activated || t?.status === "ACTIVE") return <div className="screen center-success"><div className="big-success"><Icon name="check" /></div><div role="heading" aria-level={1}>Tratamento ativo</div><Button onClick={() => showDetail(id)}>Ver tratamento</Button></div>;
-  if (t && editing) return <ScheduleEditor treatment={t} med={editing} cancel={() => setEditing(null)} done={() => {setEditing(null); result.reload();}} />;
+  if (t && editing) return <ScheduleEditor treatment={t} med={editing} reminders={reminders} cancel={() => setEditing(null)} done={() => {setEditing(null); result.reload();}} />;
   const meds = t?.medications.filter(m => m.active) || [];
   const activate = () => action.run(async () => {
-    try { await api.activate(id); setActivated(true); }
+    try {
+      await api.activate(id);
+      setActivated(true);
+      // Reconcilia as novas doses previstas do tratamento recém-ativado.
+      void reminders?.syncAgendaWindow();
+    }
     catch (e) { result.reload(); throw e; }
   });
   return <div className="screen form-screen"><Header title={initialId ? "Continuar tratamento" : "Novo tratamento"} subtitle={"Etapa " + (step+1) + " de 4"} back={() => step ? setStep(step-1) : back()} /><div className="stepper">{steps.map((label,i) => <div key={label} className={"step" + (i <= step ? " active" : "")}><i>{i < step ? <Icon name="check" size={12} /> : i+1}</i><span>{label}</span></div>)}</div>

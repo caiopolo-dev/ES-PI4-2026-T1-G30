@@ -119,7 +119,22 @@ npm.cmd test
 
 ---
 
-## 7. Checklist (Definition of Done)
+## 7. Integração ao Frontend React Web (`frontend/`)
+
+Para atender à integração direta com a interface web existente sem remover o módulo React Native (`mobile/`), o motor de lembretes foi integrado de ponta a ponta ao app React + Vite em `frontend/`:
+
+- **Serviço e driver Web ([`frontend/src/notifications/webReminders.ts`](../frontend/src/notifications/webReminders.ts)):** implementação do adaptador baseado na Browser Notifications API (`window.Notification`) + timers locais + persistência por usuário em `localStorage`, mantendo as mesmas garantias de privacidade por padrão, janela de 7 dias, teto de 50 lembretes, idempotência e ausência de registro automático.
+- **Hook de ciclo de vida ([`frontend/src/notifications/useWebReminders.ts`](../frontend/src/notifications/useWebReminders.ts)):** inicializado em [`App.tsx`](../frontend/src/App.tsx) para o usuário autenticado, revalida permissão ao retornar para a aba (`visibilitychange`/`focus`), limpa timers no logout e direciona cliques em notificações para a dose correspondente na agenda.
+- **Tela dedicada ([`frontend/src/Notifications.tsx`](../frontend/src/Notifications.tsx)):** substituiu a tela de indisponibilidade anterior (`<Unavailable />`) oferecendo status real da permissão, modal explicativo contextual antes de `Notification.requestPermission()`, toggle de ativação e privacidade, lista de lembretes agendados e aviso explícito das limitações do navegador (entrega apenas com aba/navegador aberto, sem Web Push remoto no MVP).
+- **Pontos integrados nas telas existentes:**
+  - [`Profile`](../frontend/src/App.tsx): exibe o status dinâmico em *Notificações e lembretes* (`Ativos (N)`, `Desativados`, `Bloqueadas`, `Indisponíveis`);
+  - [`Agenda.tsx`](../frontend/src/Agenda.tsx): reconcilia lembretes ao carregar `GET /doses?date=...`, abre o bottom-sheet da dose ao clicar na notificação (sem registrar automaticamente) e cancela o lembrete pendente ao registrar explicitamente **Tomei agora** ou **Não tomei**;
+  - [`Treatments.tsx`](../frontend/src/Treatments.tsx) e [`Schedule.tsx`](../frontend/src/Schedule.tsx): reconciliam lembretes ao ativar tratamento, editar cronograma ou desativar medicamento, e cancelam todos os lembretes futuros ao encerrar o tratamento (`POST /treatments/{id}/close`).
+- **Testes automatizados Web ([`frontend/__tests__/webReminders.test.ts`](../frontend/__tests__/webReminders.test.ts)):** executáveis via `npm.cmd test` em `frontend/` (4 cenários cobrindo privacidade, idempotência, preferência desligada/permissão bloqueada, edição de cronograma, encerramento de tratamento, registro explícito e clique na notificação).
+
+---
+
+## 8. Checklist (Definition of Done)
 
 - [x] Mecanismo de notificações locais implementado para React Native (`expo-notifications` + `AsyncStorage`).
 - [x] Preferência do usuário respeitada e persistida.

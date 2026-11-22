@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./scripts/ts-resolve-hook.mjs --test __tests__/webReminders.test.ts"
   },
   "dependencies": {
     "react": "^19.0.0",
