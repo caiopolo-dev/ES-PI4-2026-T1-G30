@@ -1,4 +1,4 @@
-import type { Agenda, Action, DoseRecordResponse, HistoryResponse, LoginResponse, MedicationInput, MedicationResponse, ScheduleInput, ScheduleResponse, Summary, Treatment, TreatmentInput, User } from "../types/api";
+import type { Agenda, Action, DoseRecordResponse, HistoryResponse, LoginResponse, MedicationInput, MedicationPresentationSearchResponse, MedicationResponse, ScheduleInput, ScheduleResponse, Summary, Treatment, TreatmentInput, User } from "../types/api";
 
 const sessionKey = "dosecerta.session";
 export const session = {
@@ -63,4 +63,5 @@ export const api = {
   summary: (query: string, signal?: AbortSignal) => request<Summary>("/adherence/summary?" + query, "GET", undefined, true, signal),
   history: (query: string, signal?: AbortSignal) => request<HistoryResponse>("/adherence/history?" + query, "GET", undefined, true, signal),
   catalog: () => request<{ id: string; name: string }[]>("/medications"),
+  presentations: (query: string) => request<MedicationPresentationSearchResponse>("/medication-presentations?q=" + encodeURIComponent(query)),
 };
