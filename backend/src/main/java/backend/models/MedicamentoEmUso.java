@@ -1,4 +1,3 @@
-// Autores: Cauã Bianchi Ferroni (Principal), Miguel Batista Gallinucci, Samuel Campovilla
 package backend.models;
 
 import java.util.ArrayList;
@@ -19,10 +18,12 @@ public class MedicamentoEmUso {
     private final String id;
     private String name;
     private String dose;
+    // dose descreve a concentracao informada; quantity e unit representam quanto usar por administracao.
     private Integer quantity;
     private String unit;
     private boolean active = true;
     private long revision;
+    // revision acompanha as gravacoes e permite rejeitar uma edicao baseada numa consulta antiga.
     private String observations;
     private final List<CronogramaDose> schedules;
 
@@ -111,6 +112,7 @@ public class MedicamentoEmUso {
     }
 
     public MedicamentoEmUso withRevision(long nextRevision) {
+        // A copia conserva ID e cronogramas; so atualiza a revisao informada pela gravacao.
 
         return new MedicamentoEmUso(
                 id, name, dose, quantity, unit, observations,
@@ -214,6 +216,7 @@ public class MedicamentoEmUso {
 
     // Valida os dados do medicamento; o cronograma e validado no fluxo proprio.
     public void validateForActivation() {
+        // Permiti quantidade/unidade ausentes no rascunho, mas exigi esses dados para o medicamento completo.
         if (name == null || name.isBlank() || dose == null || dose.isBlank()
                 || quantity == null || quantity <= 0 || unit == null) {
             throw new IllegalStateException("Medicamento incompleto para ativacao.");

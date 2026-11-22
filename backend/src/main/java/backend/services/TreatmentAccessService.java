@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -17,6 +18,7 @@ public final class TreatmentAccessService {
     }
 
     public List<Treatment> list(AuthContext context) {
+        // Peguei o titular do contexto e conferi o retorno para nao listar tratamentos de outra pessoa.
         String userId = Objects.requireNonNull(context).userId();
         return repository.findByUserId(userId).stream()
             .filter(treatment -> userId.equals(treatment.getUserId()))
@@ -32,12 +34,14 @@ public final class TreatmentAccessService {
     }
 
     public MedicamentoEmUso findMedication(AuthContext context, String treatmentId, String medicationId) {
+        // Primeiro autorizei o tratamento; depois procurei o medicamento dentro dele para preservar o vinculo.
         return find(context, treatmentId).findMedicationById(medicationId)
             .orElseThrow(() -> new ResourceNotFoundException());
     }
 
     public Treatment update(AuthContext context, Treatment updated) {
         Objects.requireNonNull(updated);
+        // Conferi o tratamento salvo antes de aceitar os dados recebidos para atualizacao.
         find(context, updated.getId());
         // O objeto recebido nao pode trocar o titular do tratamento.
         if (!context.userId().equals(updated.getUserId())) {

@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.repositories;
 
 import backend.models.User;
@@ -16,12 +17,16 @@ import static com.mongodb.client.model.Filters.eq;
 /** Salva e consulta usuários na collection fornecida pela conexão. */
 public final class MongoUserRepository implements UserRepository {
     private final MongoCollection<Document> users;
+    // Collection e um conjunto de documentos do MongoDB; esta guarda os usuarios.
     private final UserDocumentMapper mapper;
 
     public MongoUserRepository(MongoCollection<Document> users) {
+        // Recebi a collection da conexao existente para este repository nao abrir outro cliente.
         this.users = Objects.requireNonNull(users, "Collection de usuários deve ser informada.");
         this.mapper = new UserDocumentMapper();
         // O banco garante a unicidade mesmo quando duas gravações chegam juntas.
+        // Indice unico impede valores repetidos; aqui garante que o email normalizado nao seja duplicado.
+        // So consultar antes de inserir nao impediria dois cadastros simultaneos com o mesmo email.
         try {
             this.users.createIndex(Indexes.ascending("emailNormalized"),
                 new IndexOptions().unique(true).name("users_email_normalized_unique"));
@@ -71,21 +76,25 @@ public final class MongoUserRepository implements UserRepository {
 
     private Optional<User> toUser(Document document) {
         if (document == null) {
+            // Nao encontrar o usuario e um resultado normal da busca, nao um erro de persistencia.
             return Optional.empty();
         }
         try {
             return Optional.of(mapper.fromDocument(document));
         } catch (IllegalArgumentException e) {
+            // Diferenciei um documento invalido de uma falha de comunicacao com o banco.
             throw new UserPersistenceException(UserPersistenceException.Reason.INVALID_DOCUMENT);
         }
     }
 
     private UserPersistenceException databaseFailure(RuntimeException error) {
+        // Traduzi as falhas do driver para motivos que o restante da aplicacao consegue tratar.
         if (error instanceof MongoTimeoutException || error instanceof MongoSocketException
                 || error instanceof IllegalStateException) {
             return new UserPersistenceException(UserPersistenceException.Reason.DATABASE_UNAVAILABLE);
         }
         if (error instanceof MongoException && ((MongoException) error).getCode() == 11000) {
+            // O codigo 11000 indica que um indice unico rejeitou um ID ou email repetido.
             return new UserPersistenceException(UserPersistenceException.Reason.DUPLICATE_USER);
         }
         // Não repassa mensagens nem causas do driver que possam conter dados sensíveis.
@@ -101,6 +110,7 @@ public final class MongoUserRepository implements UserRepository {
     private String normalizeEmail(String email) {
         requireText(email, "E-mail");
         // A comparação ignora espaços nas extremidades e diferenças entre maiúsculas e minúsculas.
+        // Usei Locale.ROOT para a normalizacao nao mudar conforme o idioma do computador.
         return email.trim().toLowerCase(Locale.ROOT);
     }
 }

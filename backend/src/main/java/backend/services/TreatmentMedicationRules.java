@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -8,6 +9,7 @@ import backend.models.MedicamentoEmUso;
  * Negacoes de negocio devem lancar MedicationOperationConflictException.
  */
 public interface TreatmentMedicationRules {
+    // Separei as regras do tratamento para a gestao de medicamentos nao duplicar o ciclo de vida da #26.
     void validateAddition(AuthContext context, String treatmentId, MedicamentoEmUso medication);
     void validateUpdate(AuthContext context, String treatmentId, MedicamentoEmUso medication);
     void validateDeactivation(AuthContext context, String treatmentId, MedicamentoEmUso medication);

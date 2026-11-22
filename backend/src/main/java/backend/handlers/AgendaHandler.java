@@ -38,6 +38,7 @@ public class AgendaHandler implements HttpHandler {
     public HttpResponse handle(HttpRequest request) {
         try {
             // 1. Verificar autenticação da sessão
+            // Reutilizei o contexto do Router para nao autenticar de novo nem aceitar outro titular pela query.
             Optional<String> authenticatedUserIdOpt = request.getAuthContext().map(context -> context.userId());
             if (authenticatedUserIdOpt.isEmpty()) {
                 return HttpResponse.unauthorized("Invalid, expired, or missing session");

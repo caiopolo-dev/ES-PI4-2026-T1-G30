@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.services;
 
 import backend.models.Medication;
@@ -12,10 +13,14 @@ public class MedicationService {
     private final MedicationRepository repository;
 
     public MedicationService(MedicationRepository repository) {
+        // Injecao de dependencia e receber outro objeto pronto; isso permite trocar o repository nos testes.
+        // Recebi a interface pelo construtor para permitir trocar o armazenamento sem mudar o servico.
+        // Rejeitei null aqui para identificar uma configuracao incompleta antes de atender uma consulta.
         this.repository = Objects.requireNonNull(repository, "repository não pode ser null");
     }
 
     public List<Medication> listMedications() {
+        // A consulta fica no repository; o servico oferece a operacao sem depender de HTTP ou sockets.
         return repository.findAll();
     }
 }
