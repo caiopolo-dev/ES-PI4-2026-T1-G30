@@ -88,8 +88,10 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
         Bson current = Filters.and(Filters.eq("id", medication.getId()), Filters.ne("active", false),
             revisionFilter(medication.getRevision()));
 
-        // A revisao entra no filtro: se outra edicao ja venceu, esta gravacao nao encontra correspondencia.
-        // Revisao e o numero da edicao; esse controle otimista detecta se outra gravacao mudou os dados antes desta.
+        // A revisao e o numero da edicao que o cliente consultou. Imagine duas pessoas editando a mesma revisao:
+        // a primeira grava e incrementa esse numero; a segunda passa a enviar uma revisao antiga.
+        // Inclui a revisao no filtro do MongoDB para essa segunda gravacao nao sobrescrever a primeira.
+        // Isso e controle otimista: a gravacao so acontece se os dados ainda estiverem na revisao esperada.
         Bson filter = Filters.and(owner(treatmentId, userId), editable(medication), Filters.elemMatch("medications", current));
 
         return treatments.updateOne(filter, new Document("$set", changes)

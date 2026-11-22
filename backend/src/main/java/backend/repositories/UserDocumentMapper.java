@@ -6,9 +6,10 @@ import org.bson.Document;
 
 /** Converte o usuário entre o modelo Java e o documento do MongoDB. */
 public final class UserDocumentMapper {
-    // Mapper e um conversor; usei para separar o modelo User do Document, que representa os campos BSON do MongoDB.
-    // Centralizei a conversao para gravacao e leitura seguirem os mesmos nomes e tipos de campos.
-    // O repository chama antes de inserir: recebo o modelo Java e devolvo os campos do documento MongoDB.
+    // Mapper e a classe que converte um formato em outro. Aqui recebo User e devolvo um Document para o MongoDB.
+    // Deixei essa conversao separada para User nao precisar conhecer nomes de campos ou classes do banco.
+    // O repository chama este metodo antes de inserir; na consulta, fromDocument faz o caminho de volta.
+    // Essa separacao ajuda a manter o mesmo formato de dados e a testar a conversao sem conectar ao banco.
     public Document toDocument(User user) {
         if (user == null) {
             throw new IllegalArgumentException("Usuário deve ser informado.");

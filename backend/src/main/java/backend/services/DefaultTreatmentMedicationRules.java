@@ -37,8 +37,10 @@ public final class DefaultTreatmentMedicationRules implements TreatmentMedicatio
                 .filter(m -> m.isActive() && !m.getId().equals(medication.getId())).toList();
 
             try {
-                // Simulei o tratamento sem esse medicamento para validar a desativacao antes de gravar.
-                // Reutiliza a validacao existente de tratamento ativo, sem alterar o original.
+                // Antes de desativar, monto uma copia do tratamento com os medicamentos que vao permanecer.
+                // O proprio modelo valida se essa copia ainda pode representar um tratamento ativo.
+                // Se nao puder, interrompo a operacao antes de gravar, mantendo o tratamento original intacto.
+                // Assim reutilizo a regra da #26 em vez de escrever uma segunda validacao diferente aqui.
                 new Treatment(treatment.getId(), treatment.getUserId(), treatment.getName(),
                     treatment.getDescription(), treatment.getStartDate(), treatment.getEndDate(),
                     treatment.getStatus(), treatment.getClosedAt(), remaining);

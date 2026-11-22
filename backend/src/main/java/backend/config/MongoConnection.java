@@ -33,9 +33,9 @@ public final class MongoConnection implements AutoCloseable {
 
         MongoClient openedClient = null;
         try {
-            // Limita a espera quando o servidor não está disponível.
-            // Timeout e um limite de espera; configurei selecao, conexao e leitura para nao esperar indefinidamente.
-            // Cada etapa tem seu limite: isso nao garante cinco segundos para a operacao inteira.
+            // Timeout e o tempo limite de uma espera. Configurei esse limite para selecionar o servidor,
+            // abrir a conexao e receber dados, evitando que o programa fique esperando indefinidamente.
+            // Os cinco segundos valem para cada uma dessas etapas; a operacao inteira pode levar mais tempo.
             MongoClientSettings settings = MongoClientSettings.builder()
                 .applyConnectionString(new ConnectionString(uri.trim()))
                 .applyToClusterSettings(builder -> builder.serverSelectionTimeout(5, TimeUnit.SECONDS))

@@ -88,8 +88,9 @@ public final class DoseHistoryService {
 
         var ids = selected.stream().map(DosePrevista::getId).toList();
 
-        // Busquei os registros em lote para evitar uma consulta por dose.
-        // Busca em lote consulta varios IDs de uma vez; assim reduzo as idas ao banco.
+        // Primeiro selecionei as doses do periodo; agora busco seus registros de uma vez, pelos IDs.
+        // Isso e uma busca em lote: evita repetir a ida ao banco para cada dose da lista.
+        // Mesmo com muitos itens, esta etapa usa uma consulta para os registros e confere o titular.
         Map<String, backend.models.RegistroDeDose> associated = ids.isEmpty()
             // Sem doses selecionadas, nao preciso fazer outra consulta ao banco.
             ? Map.of() : records.findByPlannedDoseIdsAndUserId(ids, userId);
@@ -107,9 +108,10 @@ public final class DoseHistoryService {
                 record = null;
             }
 
-            // Mantive os dados da ocorrencia porque o cadastro atual pode ter mudado.
-            // Deixei unidade e acao ausentes como null para nao inventar informacoes.
-            // Sem registro nao significa SKIPPED; o cancelamento e informado separadamente da acao.
+            // Montei cada item com os dados salvos na propria dose, pois o cadastro pode ter mudado depois.
+            // Se nao existe registro, nao posso afirmar que a pessoa tomou ou ignorou a dose: a acao fica null.
+            // A unidade tambem fica null porque a ocorrencia atual nao armazena essa informacao historica.
+            // O cancelamento aparece em um campo separado, para nao ser confundido com uma acao do usuario.
             items.add(new DoseHistoryItem(
                 dose.getId(),
                 dose.getTreatmentId(),

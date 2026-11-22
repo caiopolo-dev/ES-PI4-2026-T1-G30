@@ -105,9 +105,10 @@ public final class MedicationInUseService {
 
             for (CronogramaDose cronograma : history) {
 
-                // A nova versão recebe a nova posologia.
-                // O snapshot guarda os valores daquela versao, mesmo se o cadastro mudar depois.
-                // Snapshot e uma copia dos valores de um momento; usei para preservar quantidade e unidade antigas.
+                // Snapshot e uma copia dos valores usados em uma versao do cronograma.
+                // Se a quantidade passar de 1 para 2, a versao antiga precisa continuar guardando 1.
+                // Por isso, coloquei a quantidade e a unidade novas apenas na versao que esta sendo criada.
+                // Assim, consultar o passado nao depende dos valores atuais do cadastro do medicamento.
                 if (cronograma.isActive()
                         && cronograma.getVersion() > current.getVersion()
                         && Objects.equals(cronograma.getValidFrom(), validFrom)) {
