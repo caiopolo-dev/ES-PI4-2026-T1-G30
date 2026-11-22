@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.router;
 
 public final class RouteAccessPolicy {
@@ -16,6 +17,7 @@ public final class RouteAccessPolicy {
     }
 
     // Qualquer outra rota exige autenticação por padrão.
+    // Deixei novas rotas privadas por padrao para nao liberar acesso ao esquecer uma configuracao.
     public static boolean requiresAuthentication(String method, String path) {
         return !isPublic(method, path);
     }

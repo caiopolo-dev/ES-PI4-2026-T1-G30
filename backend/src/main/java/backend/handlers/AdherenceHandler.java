@@ -28,6 +28,7 @@ public class AdherenceHandler implements HttpHandler {
     @Override
     public HttpResponse handle(HttpRequest request) {
         try {
+            // Os indicadores usam a identidade validada pelo Router, sem confiar em userId enviado pelo cliente.
             Optional<String> authenticatedUserIdOpt = request.getAuthContext().map(context -> context.userId());
             if (authenticatedUserIdOpt.isEmpty()) {
                 return HttpResponse.unauthorized("Invalid, expired, or missing session");

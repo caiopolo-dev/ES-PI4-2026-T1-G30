@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.handlers;
 
 import backend.http.HttpRequest;
@@ -13,6 +14,7 @@ import org.bson.Document;
 
 /** Converte HTTP nas operacoes do servico de medicamentos da #27. */
 public final class MedicationInUseHandler implements HttpHandler {
+    // Limitei os campos aceitos para o cliente nao alterar ID, titular ou cronogramas pelo cadastro.
     private static final Set<String> FIELDS = Set.of(
         "name", "informedDose", "quantityPerAdministration", "unit", "notes", "revision", "validFrom"
     );
@@ -41,6 +43,7 @@ public final class MedicationInUseHandler implements HttpHandler {
         if (!request.getRawQuery().isEmpty()) { return HttpResponse.badRequest("Query nao suportada."); }
         try {
             if (request.getMethod().equals("DELETE") && path.length == 5) {
+                // DELETE desativa pelo servico; nao apaga o medicamento nem suas referencias historicas.
                 if (!request.getBody().isBlank()) { return HttpResponse.badRequest("Corpo nao suportado."); }
                 service.deactivate(context, path[2], path[4]);
                 return new HttpResponse(204, "No Content", "");
@@ -66,6 +69,7 @@ public final class MedicationInUseHandler implements HttpHandler {
             if (create) {
                 medication = service.add(context, path[2], name, dose, quantity, unit, notes);
             } else if (data.containsKey("validFrom")) {
+                // validFrom indica quando a nova quantidade/unidade deve comecar a valer.
                 String validFrom = text(data, "validFrom");
 
                 if (validFrom == null || validFrom.isBlank()) {
@@ -84,6 +88,7 @@ public final class MedicationInUseHandler implements HttpHandler {
                 medication = service.saveVersionedUpdate(context, path[2], path[4], name, dose,
                     quantity, unit, notes, revision, effective);
             } else {
+                // Sem vigencia, uso a edicao comum; o servico bloqueia mudancas que exigem uma nova versao.
                 medication = service.update(context, path[2], path[4], name, dose, quantity, unit, notes, revision);
             }
             return new HttpResponse(create ? 201 : 200, create ? "Created" : "OK", toJson(medication));
@@ -101,6 +106,7 @@ public final class MedicationInUseHandler implements HttpHandler {
             throw new IllegalArgumentException("Esperado JSON.");
         }
         String body = request.getBody();
+        // Medi em bytes UTF-8 porque caracteres acentuados podem ocupar mais de um byte.
         if (body.isBlank() || body.getBytes(StandardCharsets.UTF_8).length > 16384) {
             throw new IllegalArgumentException("Corpo vazio ou acima de 16 KiB.");
         }
@@ -135,6 +141,7 @@ public final class MedicationInUseHandler implements HttpHandler {
     }
 
     private long revision(Document data) {
+        // A revisao recebida precisa ser a da ultima consulta para uma edicao nao sobrescrever outra.
         Object value = data.get("revision");
         if (!(value instanceof Integer) && !(value instanceof Long)) { throw new IllegalArgumentException("Revisao obrigatoria."); }
         long revision = ((Number) value).longValue();

@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.services;
 
 import backend.models.User;
@@ -10,10 +11,12 @@ public final class UserService {
     private final UserRepository repository;
 
     public UserService(UserRepository repository) {
+        // Recebi a interface para usar o mesmo servico com MongoDB ou com um repository de teste.
         this.repository = Objects.requireNonNull(repository, "Repository de usuários deve ser informado.");
     }
 
     // Recebe os dados já preparados, sem gerar ou verificar senhas.
+    // A persistencia fica no repository; este servico nao precisa conhecer Document ou comandos MongoDB.
     public void save(User user) {
         repository.save(user);
     }

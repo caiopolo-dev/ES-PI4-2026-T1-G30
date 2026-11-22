@@ -136,6 +136,7 @@ public class AgendaService {
         for (DosePrevista dose : validScheduledDoses) {
             plannedDoseIds.add(dose.getId());
         }
+        // Restringi os registros pelos IDs das doses e pelo titular para nao associar dados de outro usuario.
         Map<String, RegistroDeDose> recordsByDoseId =
                 doseRecordRepository.findByPlannedDoseIdsAndUserId(plannedDoseIds, normalizedUserId);
 

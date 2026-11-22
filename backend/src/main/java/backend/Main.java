@@ -26,12 +26,15 @@ public class Main {
         }
 
         // Configuração dos medicamentos
+        // Montei as dependencias aqui para cada classe receber apenas o que precisa usar.
+        // A listagem inicial continua usando o repository em memoria.
         MedicationRepository medicationRepository = new InMemoryMedicationRepository();
         MedicationService medicationService = new MedicationService(medicationRepository);
         MedicationHandler medicationHandler = new MedicationHandler(medicationService);
 
 
         // Conexão com o MongoDB
+        // Mantive o cliente aberto enquanto o servidor executa; o try fecha os recursos ao sair.
         try (MongoConnection mongoConnection = new MongoConnection()) {
 
             // Catálogo experimental somente leitura de apresentações farmacêuticas.
@@ -68,9 +71,11 @@ public class Main {
             DoseHistoryService doseHistoryService =
                     new DoseHistoryService(plannedDoseRepository, doseRecordRepository);
 
+            // O handler recebe o servico pronto e fica responsavel apenas pela consulta HTTP do historico.
             HistoryHandler historyHandler = new HistoryHandler(doseHistoryService);
 
             // Configuração do cadastro de usuários
+            // Todos os servicos de usuarios recebem o repository da mesma collection e conexao.
             UserRepository userRepository =
                     new MongoUserRepository(mongoConnection.getCollection("users"));
 
@@ -135,6 +140,8 @@ public class Main {
             BearerTokenExtractor bearerTokenExtractor = new BearerTokenExtractor();
 
             // Usa a mesma sessao do login nas consultas privadas.
+            // Lambda e uma funcao escrita em linha; usei para ligar a validacao da sessao ao Router.
+            // Extraio o token, valido a sessao e entrego so o ID do usuario ao Router.
             SessionAuthenticator sessionAuthenticator = request -> bearerTokenExtractor.extract(request).flatMap(sessionService::resolve).map(session -> session.getUserId());
             AgendaHandler agendaHandler = new AgendaHandler(agendaService);
             AdherenceHandler adherenceHandler = new AdherenceHandler(adherenceService);
@@ -152,6 +159,7 @@ public class Main {
             router.register("GET", "/favicon.svg", staticFileHandler);
             router.register("GET", "/assets/{file}", staticFileHandler);
             router.register("GET", "/health", new HealthHandler());
+            // Associei a rota ao handler para a requisicao chegar ao servico de medicamentos.
             router.register("GET", "/medications", medicationHandler);
             router.register("GET", "/medication-presentations", medicationPresentationHandler);
             router.register("GET", "/doses", agendaHandler);

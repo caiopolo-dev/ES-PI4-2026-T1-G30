@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -24,6 +25,7 @@ public final class DoseHistoryService {
 
     // Usei Clock para conseguir fixar o horario nos testes.
     private final Clock clock;
+    // Clock fornece o horario atual; recebe-lo permite usar um horario fixo e previsivel nos testes.
 
     public DoseHistoryService(PlannedDoseRepository doses, DoseRecordRepository records) {
 
@@ -31,6 +33,7 @@ public final class DoseHistoryService {
     }
 
     public DoseHistoryService(PlannedDoseRepository doses, DoseRecordRepository records, Clock clock) {
+        // Reutilizei os contratos existentes para consultar os mesmos dados da agenda, sem criar outro historico.
 
         this.doses = Objects.requireNonNull(doses);
         this.records = Objects.requireNonNull(records);
@@ -55,6 +58,7 @@ public final class DoseHistoryService {
         List<DosePrevista> selected = new ArrayList<>();
 
         for (var dose : doses.findByUserAndPeriod(userId, start, end)) {
+            // O periodo considera o horario previsto da dose, mesmo se a acao foi registrada em outro dia.
             // Conferi titular e periodo novamente para nao expor uma ocorrencia indevida.
             if (!userId.equals(dose.getUserId()) || dose.getScheduledAt().isBefore(start)
                     || !dose.getScheduledAt().isBefore(end)) {
@@ -69,6 +73,7 @@ public final class DoseHistoryService {
                 continue;
             }
 
+            // Inclui futuras e canceladas tambem; esta consulta mostra o historico, nao calcula adesao.
             selected.add(dose);
         }
 
@@ -81,6 +86,7 @@ public final class DoseHistoryService {
         var ids = selected.stream().map(DosePrevista::getId).toList();
 
         // Busquei os registros em lote para evitar uma consulta por dose.
+        // Busca em lote consulta varios IDs de uma vez; assim reduzo as idas ao banco.
         Map<String, backend.models.RegistroDeDose> associated = ids.isEmpty()
             ? Map.of() : records.findByPlannedDoseIdsAndUserId(ids, userId);
 
@@ -88,15 +94,18 @@ public final class DoseHistoryService {
 
         for (var dose : selected) {
 
+            // Associei pelo ID da ocorrencia, pois o mesmo medicamento pode ter varias doses no dia.
             var record = associated.get(dose.getId());
 
             if (record != null && (!userId.equals(record.getUserId())
                     || !dose.getId().equals(record.getPlannedDoseId()))) {
+                // Ignorei uma associacao inconsistente para nao expor a acao de outra dose ou pessoa.
                 record = null;
             }
 
             // Mantive os dados da ocorrencia porque o cadastro atual pode ter mudado.
             // Deixei unidade e acao ausentes como null para nao inventar informacoes.
+            // Sem registro nao significa SKIPPED; o cancelamento e informado separadamente da acao.
             items.add(new DoseHistoryItem(
                 dose.getId(),
                 dose.getTreatmentId(),
@@ -124,6 +133,7 @@ public final class DoseHistoryService {
     }
 
     private String filter(String value) {
+        // null significa filtro nao enviado; texto vazio e rejeitado para nao esconder um parametro incorreto.
 
         if (value == null) {
             return null;
