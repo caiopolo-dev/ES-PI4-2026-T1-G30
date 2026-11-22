@@ -22,7 +22,8 @@ class RouteAccessPolicyTest {
     @Test
     void requiresAuthenticationForPrivateAndFutureRoutes() {
         for (String path : new String[] {
-            "/medications", "/auth/me", "/auth/logout", "/treatments", "/new-route"
+            "/medications", "/medication-presentations", "/auth/me", "/auth/logout",
+            "/treatments", "/new-route"
         }) {
             assertTrue(RouteAccessPolicy.requiresAuthentication("GET", path));
             assertTrue(RouteAccessPolicy.requiresAuthentication("POST", path));

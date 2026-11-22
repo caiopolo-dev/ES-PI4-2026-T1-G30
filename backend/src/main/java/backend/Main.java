@@ -34,6 +34,15 @@ public class Main {
         // Conexão com o MongoDB
         try (MongoConnection mongoConnection = new MongoConnection()) {
 
+            // Catálogo experimental somente leitura de apresentações farmacêuticas.
+            MedicationPresentationRepository medicationPresentationRepository =
+                    new MongoMedicationPresentationRepository(
+                            mongoConnection.getCollection("medication_presentations"));
+            MedicationPresentationService medicationPresentationService =
+                    new MedicationPresentationService(medicationPresentationRepository);
+            MedicationPresentationHandler medicationPresentationHandler =
+                    new MedicationPresentationHandler(medicationPresentationService);
+
             // Configuração dos repositories de doses usando a conexão MongoDB
             PlannedDoseRepository plannedDoseRepository =
                     new MongoPlannedDoseRepository(mongoConnection.getDatabase());
@@ -144,6 +153,7 @@ public class Main {
             router.register("GET", "/assets/{file}", staticFileHandler);
             router.register("GET", "/health", new HealthHandler());
             router.register("GET", "/medications", medicationHandler);
+            router.register("GET", "/medication-presentations", medicationPresentationHandler);
             router.register("GET", "/doses", agendaHandler);
             // issue 32
             router.register("PUT", "/doses/{id}/record", doseRecordHandler);

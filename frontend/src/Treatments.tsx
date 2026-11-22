@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { api, ApiError } from "./api/client";
-import type { Medication, MedicationInput, Treatment, TreatmentInput, TreatmentStatus } from "./types/api";
+import type { Medication, MedicationInput, MedicationPresentation, Treatment, TreatmentInput, TreatmentStatus } from "./types/api";
 import { Badge, BottomNav, Button, Field, Header, Icon, Loading, Notice, civilDate, formatDate, localDateTime, toInstant, useAction, useResource, zone, type Navigate } from "./ui";
 import { dayNames, ScheduleEditor } from "./Schedule";
+import { MedicationPresentationSearch, presentationPackageDescription } from "./MedicationPresentationSearch";
 
 const statuses: Record<TreatmentStatus,string> = { ACTIVE: "Ativos", DRAFT: "Rascunhos", CLOSED: "Encerrados" };
 const singular: Record<TreatmentStatus,string> = { ACTIVE: "Ativo", DRAFT: "Rascunho", CLOSED: "Encerrado" };
@@ -48,6 +49,8 @@ function MetaForm({ treatment, done, advance, draft, readonlyPeriod = false }: {
 }
 
 function MedicationForm({ treatment, medication, done, wizard = false }: { treatment: Treatment; medication?: Medication; done: (next: "another" | "continue" | "leave") => void; wizard?: boolean }) {
+  const [mode, setMode] = useState<"search" | "form">(medication ? "form" : "search");
+  const [selectedPresentation, setSelectedPresentation] = useState<MedicationPresentation | null>(null);
   const [name, setName] = useState(medication?.name || "");
   const [dose, setDose] = useState(medication?.dose || "");
   const [quantity, setQuantity] = useState(medication?.quantity?.toString() || "");
@@ -55,7 +58,6 @@ function MedicationForm({ treatment, medication, done, wizard = false }: { treat
   const [notes, setNotes] = useState(medication?.observations || "");
   const [validFrom, setValidFrom] = useState(localDateTime(new Date(Date.now() + 3600000)));
   const [reconcile, setReconcile] = useState(false);
-  const suggested = useResource("catalog", api.catalog);
   const action = useAction();
   const changedDosage = medication && medication.schedules.length > 0 && (medication.quantity !== (quantity ? Number(quantity) : null) || medication.unit !== (unit.trim() || null));
   const save = (next: "another" | "continue" | "leave") => action.run(async () => {
@@ -75,11 +77,40 @@ function MedicationForm({ treatment, medication, done, wizard = false }: { treat
     }
     done(next);
   });
-  return <form className="form-stack" onSubmit={e => { e.preventDefault(); void save("continue"); }}><Field label="Nome do medicamento" list="catalog" value={name} onChange={e => setName(e.target.value)} /><datalist id="catalog">{suggested.data?.map(m => <option key={m.id} value={m.name} />)}</datalist>
-    <Field label="Dosagem / concentração" value={dose} onChange={e => setDose(e.target.value)} /><div className="field-grid"><Field label="Quantidade" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} /><Field label="Unidade" value={unit} onChange={e => setUnit(e.target.value)} /></div>
-    <Field label="Observações do medicamento" value={notes} onChange={e => setNotes(e.target.value)} />{changedDosage && <Field label="Nova posologia a partir de (São Paulo)" type="datetime-local" required value={validFrom} onChange={e => setValidFrom(e.target.value)} />}
+  const selectPresentation = (presentation: MedicationPresentation) => {
+    setSelectedPresentation(presentation);
+    setName(presentation.name || presentation.activeIngredient || "");
+    setDose(presentation.concentration || "");
+    setUnit(presentation.dosageForm || "");
+    // O conteúdo da embalagem nunca representa a quantidade administrada.
+    setQuantity("");
+    setNotes("");
+    setMode("form");
+  };
+  const manual = () => {
+    setSelectedPresentation(null);
+    setName("");
+    setDose("");
+    setQuantity("");
+    setUnit("");
+    setNotes("");
+    setMode("form");
+  };
+  if (mode === "search") {
+    return <MedicationPresentationSearch
+      onSelect={selectPresentation}
+      onManual={manual}
+      onContinue={wizard && treatment.medications.some(item => item.active) ? () => done("continue") : undefined}
+      onLeave={wizard ? () => done("leave") : undefined}
+    />;
+  }
+  return <form className="form-stack" onSubmit={e => { e.preventDefault(); void save("continue"); }}>
+    {selectedPresentation && <><div className="product-ident"><span>Apresentação experimental selecionada</span><strong>{selectedPresentation.name} {selectedPresentation.concentration}</strong><small>{[selectedPresentation.activeIngredient !== selectedPresentation.name ? selectedPresentation.activeIngredient : null, selectedPresentation.dosageForm, selectedPresentation.manufacturer, presentationPackageDescription(selectedPresentation)].filter(Boolean).join(" · ")}</small></div><Notice>O conteúdo da embalagem é apenas informativo. Preencha abaixo quanto é administrado em cada horário.</Notice></>}
+    <Field label="Medicamento / princípio ativo" value={name} onChange={e => setName(e.target.value)} />
+    <Field label="Apresentação / concentração" value={dose} onChange={e => setDose(e.target.value)} /><div className="field-grid"><Field label="Quantidade por administração" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} /><Field label="Unidade de administração" value={unit} onChange={e => setUnit(e.target.value)} /></div>
+    <Field label="Observações opcionais" value={notes} onChange={e => setNotes(e.target.value)} />{changedDosage && <Field label="Nova posologia a partir de (São Paulo)" type="datetime-local" required value={validFrom} onChange={e => setValidFrom(e.target.value)} />}
     {action.error && <Notice error>{action.error}</Notice>}{reconcile ? <button type="button" className="btn btn-secondary" onClick={() => done("another")}>Reconsultar medicamentos gravados</button> : <><button className="btn btn-primary" disabled={action.pending}>{wizard ? "Continuar" : "Salvar medicamento"}</button>
-    {wizard && <><button type="button" className="btn btn-secondary" disabled={action.pending} onClick={() => save("another")}>Adicionar outro medicamento</button><button type="button" className="btn btn-ghost" disabled={action.pending} onClick={() => save("leave")}>Salvar rascunho</button></>}</>}</form>;
+    {wizard && <><button type="button" className="btn btn-secondary" disabled={action.pending} onClick={() => save("another")}>Adicionar outro medicamento</button><button type="button" className="btn btn-ghost" disabled={action.pending} onClick={() => save("leave")}>Salvar rascunho</button></>}{!medication && <button type="button" className="btn btn-ghost" disabled={action.pending} onClick={() => setMode("search")}>Buscar no catálogo experimental</button>}</>}</form>;
 }
 
 type DetailMode = { kind: "view" | "meta" | "add" } | { kind: "schedule" | "med"; med: Medication };
