@@ -2,7 +2,7 @@
 
 **Base auditada:** [`develop` / commit `dfe4117ef5239359ef1c3f9d084746ca47067785`](https://github.com/caiopolo-dev/ES-PI4-2026-T1-G30/tree/dfe4117ef5239359ef1c3f9d084746ca47067785)  
 **Data da revisão:** 22/11/2026  
-**Artefato principal:** [`openapi.yaml`](./openapi.yaml) — OpenAPI 3.1, **17 caminhos e 21 operações**, 36 schemas.  
+**Artefato principal:** [`openapi.yaml`](openapi.yaml) — OpenAPI 3.1, **17 caminhos e 21 operações**, 36 schemas.  
 **Estado:** fotografia **as-is** do backend nesta revisão, verificada por leitura dos handlers/serviços. **Não houve execução local do servidor, testes de contrato nem verificação por HTTP.** Não afirmar que esta versão já foi validada conjuntamente pelo frontend. Alterações posteriores à SHA exigem nova revisão.
 
 ## 1. Objetivo e metodologia
