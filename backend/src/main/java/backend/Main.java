@@ -25,14 +25,15 @@ public class Main {
             porta = Integer.parseInt(args[0]);
         }
 
-        // Configuração dos medicamentos
-        MedicationRepository medicationRepository = new InMemoryMedicationRepository();
-        MedicationService medicationService = new MedicationService(medicationRepository);
-        MedicationHandler medicationHandler = new MedicationHandler(medicationService);
-
-
         // Conexão com o MongoDB
         try (MongoConnection mongoConnection = new MongoConnection()) {
+
+            // Catálogo persistente de medicamentos, sem dependência de provedores externos.
+            MongoMedicationRepository medicationRepository =
+                    new MongoMedicationRepository(mongoConnection.getDatabase());
+            medicationRepository.ensureDefaultCatalog();
+            MedicationService medicationService = new MedicationService(medicationRepository);
+            MedicationHandler medicationHandler = new MedicationHandler(medicationService);
 
             // Configuração dos repositories de doses usando a conexão MongoDB
             PlannedDoseRepository plannedDoseRepository =
