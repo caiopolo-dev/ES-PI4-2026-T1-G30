@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -11,6 +12,7 @@ public final class DefaultTreatmentMedicationRules implements TreatmentMedicatio
     private final TreatmentService treatments;
 
     public DefaultTreatmentMedicationRules(TreatmentService treatments) {
+        // Reutilizei o servico de tratamentos para manter a mesma verificacao de titularidade da #26.
         this.treatments = Objects.requireNonNull(treatments);
     }
 
@@ -31,6 +33,7 @@ public final class DefaultTreatmentMedicationRules implements TreatmentMedicatio
             var remaining = treatment.getMedications().stream()
                 .filter(m -> m.isActive() && !m.getId().equals(medication.getId())).toList();
             try {
+                // Simulei o tratamento sem esse medicamento para validar a desativacao antes de gravar.
                 // Reutiliza a validacao existente de tratamento ativo, sem alterar o original.
                 new Treatment(treatment.getId(), treatment.getUserId(), treatment.getName(),
                     treatment.getDescription(), treatment.getStartDate(), treatment.getEndDate(),
@@ -43,10 +46,12 @@ public final class DefaultTreatmentMedicationRules implements TreatmentMedicatio
 
     @Override
     public int minimumRemainingActiveMedications(AuthContext context, String treatmentId) {
+        // ACTIVE precisa manter medicamento ativo; DRAFT pode ficar vazio enquanto e preparado.
         return editable(context, treatmentId).getStatus() == TreatmentStatus.ACTIVE ? 1 : 0;
     }
 
     private Treatment editable(AuthContext context, String treatmentId) {
+        // O encerramento preserva consultas, mas impede novas alteracoes nos medicamentos.
         Treatment treatment = treatments.find(context, treatmentId);
         if (treatment.getStatus() == TreatmentStatus.CLOSED) {
             throw new MedicationOperationConflictException("Tratamento encerrado nao permite alteracoes.");

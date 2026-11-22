@@ -53,9 +53,11 @@ public final class MedicationInUseService {
 
     public PreparedMedicationChange prepareVersionedUpdate(AuthContext context, String treatmentId, String medicationId,
             String name, String dose, Integer quantity, String unit, String notes, long expectedRevision, Instant validFrom) {
+        // Preparei a mudanca sem gravar para validar tudo antes de atualizar medicamento e versoes juntos.
         if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) { throw new IllegalArgumentException("Revisao invalida."); }
         Objects.requireNonNull(validFrom, "Inicio de vigencia obrigatorio.");
         if (validFrom.isBefore(Instant.now())) { throw new IllegalArgumentException("A mudanca nao pode alterar o passado."); }
+        // Busquei pelo titular e pela revisao para nao preparar uma edicao usando dados desatualizados.
         MedicamentoEmUso previous = find(context, treatmentId, medicationId);
         if (previous.getRevision() != expectedRevision || !previous.isActive()) {
             throw new MedicationOperationConflictException("Medicamento alterado ou inativo.");
@@ -74,6 +76,7 @@ public final class MedicationInUseService {
             var current = previous.getActiveSchedule().orElseThrow(
                 () -> new MedicationOperationConflictException("Medicamento sem cronograma ativo."));
             if (current.getValidFrom() == null || !validFrom.isAfter(current.getValidFrom())) {
+                // Sem inicio conhecido, nao da para encerrar a versao antiga sem inventar sua vigencia.
                 throw new MedicationOperationConflictException("Nova vigencia deve ser posterior ao inicio conhecido da versao atual.");
             }
             // Reutiliza o versionamento da #28 sem duplicar suas regras ou persistir separadamente.
@@ -86,6 +89,8 @@ public final class MedicationInUseService {
             for (CronogramaDose cronograma : history) {
 
                 // A nova versão recebe a nova posologia.
+                // O snapshot guarda os valores daquela versao, mesmo se o cadastro mudar depois.
+                // Snapshot e uma copia dos valores de um momento; usei para preservar quantidade e unidade antigas.
                 if (cronograma.isActive()
                         && cronograma.getVersion() > current.getVersion()
                         && Objects.equals(cronograma.getValidFrom(), validFrom)) {
@@ -124,6 +129,7 @@ public final class MedicationInUseService {
             var change = prepareVersionedUpdate(context, treatmentId, medicationId, name, dose, quantity, unit,
                     notes, expectedRevision, validFrom);
             var updated = change.updated();
+            // Uma unica gravacao impede salvar a quantidade nova com o historico de versoes antigo.
             if (!repository.updateWithSchedules(treatmentId, context.userId(), updated)) {
                 find(context, treatmentId, medicationId);
                 treatmentRules.validateUpdate(context, treatmentId, updated);
@@ -152,6 +158,7 @@ public final class MedicationInUseService {
     }
 
     public MedicamentoEmUso find(AuthContext context, String treatmentId, String medicationId) {
+        // Os tres IDs juntos impedem acessar um medicamento de outro tratamento ou usuario.
         String userId = Objects.requireNonNull(context).userId();
         return repository.find(treatmentId, userId, medicationId).orElseThrow(ResourceNotFoundException::new);
     }
@@ -181,6 +188,7 @@ public final class MedicationInUseService {
             var medication = new MedicamentoEmUso(previous.getId(), name, dose, quantity,
                     unit, notes, previous.isActive(), previous.getSchedules(), previous.getRevision());
             // A mudanca com impacto no cronograma depende do versionamento da #28.
+            // Mantive esse bloqueio na edicao comum; a mudanca com vigencia usa saveVersionedUpdate().
             if (!previous.getSchedules().isEmpty()
                     && (!Objects.equals(previous.getQuantity(), medication.getQuantity())
                     || !Objects.equals(previous.getUnit(), medication.getUnit()))) {
@@ -215,6 +223,7 @@ public final class MedicationInUseService {
             }
 
             int minimum = treatmentRules.minimumRemainingActiveMedications(context, treatmentId);
+            // O repository confere esse minimo novamente na gravacao para cobrir alteracoes concorrentes.
 
             if (!repository.deactivate(
                     treatmentId,

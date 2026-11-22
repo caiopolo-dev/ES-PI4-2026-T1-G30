@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.models;
 
 import java.time.Instant;
@@ -7,9 +8,11 @@ import java.util.Objects;
 
 /** Periodo consultado e itens do historico, incluindo quando a lista esta vazia. */
 public record DoseHistoryResponse(
+        // Mantive periodo e fuso na resposta para o consumidor interpretar os itens no mesmo contexto da consulta.
         LocalDate from,
         LocalDate to,
         String timezone,
+        // Uma referencia unica permite distinguir doses futuras e vencidas sem inventar uma acao.
         Instant referenceTime,
 
         List<DoseHistoryItem> items) {

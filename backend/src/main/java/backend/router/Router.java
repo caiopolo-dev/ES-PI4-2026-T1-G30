@@ -17,6 +17,7 @@ public class Router {
     private final backend.auth.SessionAuthenticator authenticator;
 
     public Router() {
+        // Sem autenticador configurado, nenhuma requisicao consegue acessar uma rota privada.
         this(request -> java.util.Optional.empty());
     }
 
@@ -79,12 +80,14 @@ public class Router {
 
         // 3. Delega o processamento para o handler correspondente
         if (RouteAccessPolicy.requiresAuthentication(method, path)) {
+            // Centralizei a autenticacao aqui para os handlers receberem a identidade ja validada.
             try {
                 var userId = authenticator.resolveAuthenticatedUserId(request);
                 if (userId.isEmpty() || userId.get().isBlank()) {
                     AccessAudit.record(AccessAudit.Event.AUTHENTICATION_REQUIRED);
                     return HttpResponse.unauthorized("Invalid, expired, or missing session");
                 }
+                // O contexto usa o ID da sessao, nao um userId escolhido no corpo ou na query.
                 return execute(handler, request.withAuthContext(new backend.auth.AuthContext(userId.get())));
             } catch (RuntimeException error) {
                 return HttpResponse.internalServerError("Internal server error");
@@ -117,9 +120,11 @@ public class Router {
             }
             return response;
         } catch (backend.auth.ResourceNotFoundException error) {
+            // Recurso inexistente e recurso alheio recebem a mesma resposta para nao revelar sua existencia.
             AccessAudit.record(AccessAudit.Event.RESOURCE_UNAVAILABLE);
             return HttpResponse.notFound("Recurso nao encontrado.");
         } catch (backend.auth.AccessDeniedException error) {
+            // Permissao negada e diferente de sessao ausente; por isso a resposta e 403.
             AccessAudit.record(AccessAudit.Event.PERMISSION_DENIED);
             return HttpResponse.forbidden("Acesso negado.");
         } catch (RuntimeException error) {

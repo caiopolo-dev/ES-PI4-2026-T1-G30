@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.repositories;
 
 import backend.models.User;
@@ -5,6 +6,8 @@ import org.bson.Document;
 
 /** Converte o usuário entre o modelo Java e o documento do MongoDB. */
 public final class UserDocumentMapper {
+    // Mapper e um conversor; usei para separar o modelo User do Document, que representa os campos BSON do MongoDB.
+    // Centralizei a conversao para gravacao e leitura seguirem os mesmos nomes e tipos de campos.
     public Document toDocument(User user) {
         if (user == null) {
             throw new IllegalArgumentException("Usuário deve ser informado.");
@@ -27,6 +30,7 @@ public final class UserDocumentMapper {
         }
 
         // Reconstrói o modelo sem colocar dependências do MongoDB dentro de User.
+        // Validei os campos na leitura para nao devolver um usuario montado com dados incompletos.
         return new User(
             readText(document.get("_id"), "_id"),
             readText(document.get("name"), "name"),
@@ -49,6 +53,7 @@ public final class UserDocumentMapper {
 
     private int readIterations(Object value) {
         // A modelagem exige Int32 positivo, sem converter ou truncar outros tipos.
+        // Uma conversao automatica poderia esconder um valor gravado com o tipo errado.
         if (!(value instanceof Integer) || ((Integer) value) <= 0) {
             throw new IllegalArgumentException("Campo de usuário inválido: passwordIterations");
         }

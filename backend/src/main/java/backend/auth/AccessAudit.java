@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.auth;
 
 import java.util.logging.Logger;
@@ -16,6 +17,7 @@ public final class AccessAudit {
     }
 
     public static void record(Event event) {
+        // Registrei so o nome do evento para o log nao guardar tokens nem dados pessoais da requisicao.
         LOGGER.info(event.name());
     }
 }
