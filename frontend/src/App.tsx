@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, session } from "./api/client";
 import type { User } from "./types/api";
 import { Badge, BottomNav, Button, Field, Header, Icon, Loading, Logo, Notice, useAction, useResource, visualSizes, type Navigate, type Screen, type VisualSize } from "./ui";
 import { Home } from "./Agenda";
 import { Detail, Treatments, Wizard } from "./Treatments";
 import { History } from "./History";
+import { NotificationsScreen } from "./Notifications";
+import { useWebReminders } from "./notifications/useWebReminders";
+import type { ReminderNavigationTarget } from "./notifications/webReminders";
 
 function Welcome({ navigate }: { navigate: (screen: Screen) => void }) {
   return <div className="welcome-screen">
@@ -41,12 +44,12 @@ function Auth({ register, navigate, authenticated, message }: { register: boolea
       <button className="btn btn-primary" disabled={action.pending}>{creating ? "Criar conta" : "Entrar"}</button></form>
       <div className="auth-foot">{creating ? "Já tem conta?" : "Ainda não tem conta?"} <button disabled={action.pending} onClick={() => {setCreated(false); navigate(creating ? "login" : "register");}}>{creating ? "Entrar" : "Criar conta"}</button></div></div></div>;
 }
-function Profile({ user, navigate, logout, size }: { user: User; navigate: Navigate; logout: () => void; size: VisualSize }) {
+function Profile({ user, navigate, logout, size, remindersStatus }: { user: User; navigate: Navigate; logout: () => void; size: VisualSize; remindersStatus: string }) {
   const action = useAction();
   const signOut = () => action.run(async () => { await api.logout(); session.clear(); logout(); });
   return <div className="screen"><Header title="Perfil e configurações" back={() => navigate("home")} /><main className="content profile-content"><div className="profile-card"><div className="profile-avatar">{user.name.trim().split(/\s+/).slice(0,2).map(n => n[0]).join("").toUpperCase()}</div><div><strong>{user.name}</strong><span>{user.email}</span></div></div>
     <div className="settings-group"><div className="group-label">Sua conta</div><div className="settings-card"><div className="settings-row"><span className="settings-icon"><Icon name="user" /></span><span>Edição da conta</span><small>Indisponível</small></div></div></div>
-    <div className="settings-group"><div className="group-label">Preferências</div><div className="settings-card"><button className="settings-row" onClick={() => navigate("notifications")}><span className="settings-icon"><Icon name="bell" /></span><span>Notificações e lembretes</span><small>Indisponíveis</small></button><button className="settings-row" onClick={() => navigate("visual-accessibility")}><span className="settings-icon"><Icon name="eye" /></span><span>Tamanho de fonte e ícones</span><small>{visualSizes[size].label}</small></button><div className="settings-row"><span className="settings-icon"><Icon name="clock" /></span><span>Alterar margem de atraso</span><small>Indisponível</small></div></div></div>
+    <div className="settings-group"><div className="group-label">Preferências</div><div className="settings-card"><button className="settings-row" onClick={() => navigate("notifications")}><span className="settings-icon"><Icon name="bell" /></span><span>Notificações e lembretes</span><small>{remindersStatus}</small></button><button className="settings-row" onClick={() => navigate("visual-accessibility")}><span className="settings-icon"><Icon name="eye" /></span><span>Tamanho de fonte e ícones</span><small>{visualSizes[size].label}</small></button><div className="settings-row"><span className="settings-icon"><Icon name="clock" /></span><span>Alterar margem de atraso</span><small>Indisponível</small></div></div></div>
     {action.error && <Notice error>{action.error}</Notice>}<button className="logout-row" disabled={action.pending} onClick={signOut}><Icon name="logout" />Sair da conta</button></main></div>;
 }
 function VisualAccessibility({ navigate, selected, onSelect }: { navigate: (s: Screen) => void; selected: VisualSize; onSelect: (size: VisualSize) => void }) {
@@ -89,10 +92,17 @@ export default function App() {
   const [user,setUser] = useState<User | null>(null);
   const [selected,setSelected] = useState("");
   const [message,setMessage] = useState("");
+  const [reminderTarget, setReminderTarget] = useState<ReminderNavigationTarget | null>(null);
   const [size,setSize] = useState<VisualSize>(() => { const stored = localStorage.getItem("dosecerta.visual-size"); return stored === "medium" || stored === "large" ? stored : "standard"; });
   const navigate: Navigate = s => {setScreen(s); window.scrollTo(0,0);};
+  const openReminderTarget = useCallback((target: ReminderNavigationTarget) => {
+    setReminderTarget(target);
+    setScreen("home");
+    window.scrollTo(0, 0);
+  }, []);
+  const reminders = useWebReminders(user, openReminderTarget);
   const signedIn = (validUser:User) => { setUser(validUser); setRestore(false); setMessage(""); navigate("home"); };
-  const reset = (expired = false) => { setRestore(false); setUser(null); setSelected(""); setMessage(expired ? "Sua sessão expirou. Entre novamente." : ""); navigate("login"); };
+  const reset = (expired = false) => { setRestore(false); setUser(null); setSelected(""); setReminderTarget(null); setMessage(expired ? "Sua sessão expirou. Entre novamente." : ""); navigate("login"); };
   useEffect(() => { const expire = () => reset(true); window.addEventListener("dosecerta:expired",expire); return () => window.removeEventListener("dosecerta:expired",expire); }, []);
   const detail = (id:string) => {setSelected(id); navigate("treatment-detail");};
   const scale = visualSizes[size];
@@ -101,13 +111,14 @@ export default function App() {
   else if (!user) page = screen === "welcome" ? <Welcome navigate={navigate} /> : <Auth key={screen} register={screen === "register"} authenticated={signedIn} navigate={navigate} message={message} />;
   else switch (screen) {
     case "treatments": page = <Treatments navigate={navigate} select={detail} create={() => {setSelected(""); navigate("new-treatment");}} />; break;
-    case "new-treatment": page = <Wizard initialId={selected} back={() => navigate("treatments")} showDetail={detail} />; break;
-    case "treatment-detail": page = <Detail id={selected} back={() => navigate("treatments")} resume={() => navigate("new-treatment")} />; break;
+    case "new-treatment": page = <Wizard initialId={selected} back={() => navigate("treatments")} showDetail={detail} reminders={reminders} />; break;
+    case "treatment-detail": page = <Detail id={selected} back={() => navigate("treatments")} resume={() => navigate("new-treatment")} reminders={reminders} />; break;
     case "history": page = <History navigate={navigate} />; break;
-    case "profile": page = <Profile user={user} navigate={navigate} logout={() => reset()} size={size} />; break;
+    case "profile": page = <Profile user={user} navigate={navigate} logout={() => reset()} size={size} remindersStatus={reminders.statusSummaryLabel} />; break;
     case "visual-accessibility": page = <VisualAccessibility navigate={navigate} selected={size} onSelect={next => {setSize(next);localStorage.setItem("dosecerta.visual-size",next);}} />; break;
-    case "prices": case "notifications": page = <Unavailable prices={screen === "prices"} navigate={navigate} />; break;
-    default: page = <Home user={user} navigate={navigate} />;
+    case "notifications": page = <NotificationsScreen reminders={reminders} navigate={navigate} onOpenDose={openReminderTarget} />; break;
+    case "prices": page = <Unavailable prices navigate={navigate} />; break;
+    default: page = <Home user={user} navigate={navigate} reminders={reminders} reminderTarget={reminderTarget} onClearReminderTarget={() => setReminderTarget(null)} />;
   }
   return <div className="app-shell"><div className="phone" style={{"--font-scale":scale.fontScale,"--icon-scale":scale.iconScale} as React.CSSProperties}>{page}</div></div>;
 }

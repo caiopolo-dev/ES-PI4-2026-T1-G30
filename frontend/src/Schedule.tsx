@@ -2,15 +2,16 @@ import { useState } from "react";
 import { api, ApiError } from "./api/client";
 import type { Day, Frequency, Medication, ScheduleResponse, Treatment } from "./types/api";
 import { Field, Header, Loading, Notice, civilDate, localDateTime, toInstant, useAction, useResource, zone } from "./ui";
+import type { RemindersController } from "./notifications/useWebReminders";
 
 export const dayNames: Record<Day, string> = { MONDAY: "Seg", TUESDAY: "Ter", WEDNESDAY: "Qua", THURSDAY: "Qui", FRIDAY: "Sex", SATURDAY: "Sáb", SUNDAY: "Dom" };
-export function ScheduleEditor({ treatment, med, done, cancel }: { treatment: Treatment; med: Medication; done: () => void; cancel: () => void }) {
+export function ScheduleEditor({ treatment, med, done, cancel, reminders }: { treatment: Treatment; med: Medication; done: () => void; cancel: () => void; reminders?: RemindersController }) {
   const query = useResource(treatment.id + med.id, () => api.schedule(treatment.id, med.id));
   return <div className="screen form-screen"><Header title="Cronograma" subtitle={med.name + " " + med.dose} back={cancel} /><main className="content form-content">
-    {!query.data ? <Loading error={query.error} retry={query.reload} /> : <Form key={query.data.revision} treatment={treatment} med={med} model={query.data} reload={query.reload} done={done} />}
+    {!query.data ? <Loading error={query.error} retry={query.reload} /> : <Form key={query.data.revision} treatment={treatment} med={med} model={query.data} reload={query.reload} done={done} reminders={reminders} />}
   </main></div>;
 }
-function Form({ treatment, med, model, reload, done }: { treatment: Treatment; med: Medication; model: ScheduleResponse; reload: () => void; done: () => void }) {
+function Form({ treatment, med, model, reload, done, reminders }: { treatment: Treatment; med: Medication; model: ScheduleResponse; reload: () => void; done: () => void; reminders?: RemindersController }) {
   const latest = model.versions.reduce<typeof model.current>((current, item) => !current || item.version > current.version ? item : current, null);
   const timezone = latest?.timezone || zone;
   const today = civilDate(new Date(), timezone);
@@ -35,6 +36,10 @@ function Form({ treatment, med, model, reload, done }: { treatment: Treatment; m
     if (effective.slice(0,10) < start || (end && effective.slice(0,10) > end)) throw new Error("A vigência precisa estar dentro do período do cronograma.");
     try {
       await api.saveSchedule(treatment.id, med.id, { frequency, daysOfWeek: frequency === "EVERY_DAY" ? null : days, times: [...times].sort(), startDate: start, endDate: end || null, timezone, validFrom, revision: model.revision });
+      if (treatment.status === "ACTIVE") {
+        // Reconcilia lembretes futuros deste tratamento sem tocar no histórico.
+        void reminders?.handleScheduleUpdated(treatment.id);
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setConflict(true);
       throw e;
@@ -49,7 +54,7 @@ function Form({ treatment, med, model, reload, done }: { treatment: Treatment; m
     <button type="button" className="btn btn-secondary" onClick={() => setTimes([...times, ""])}>Adicionar horário</button>
     <div className="field-grid"><Field label="Início" type="date" min={treatment.startDate || undefined} required value={start} onChange={e => setStart(e.target.value)} /><Field label="Término" type="date" min={start} max={treatment.endDate || undefined} value={end} onChange={e => setEnd(e.target.value)} /></div>
     <Field type="datetime-local" required label={"Válido a partir de (" + timezone + ")"} value={effective} onChange={e => setEffective(e.target.value)} />
-    <small>Notificações de lembrete indisponíveis.</small>
+    <small>{reminders?.effectiveActive ? "Ao salvar, os lembretes futuros deste tratamento serão atualizados automaticamente." : "Os lembretes podem ser ativados na tela de Notificações e lembretes."}</small>
     {action.error && <Notice error>{action.error}</Notice>}
     {conflict ? <button type="button" className="btn btn-secondary" onClick={reload}>Recarregar a revisão atual</button> : <button className="btn btn-primary" disabled={action.pending}>Salvar cronograma</button>}
   </form>;
