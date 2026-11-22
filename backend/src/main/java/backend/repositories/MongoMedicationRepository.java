@@ -1,9 +1,7 @@
-
 //Caio Ferreira Polo issue 40
 package backend.repositories;
 
 import backend.models.Medication;
-import backend.models.MedicationPresentation;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -32,15 +30,18 @@ public class MongoMedicationRepository implements MedicationRepository {
 
     public MongoMedicationRepository(MongoCollection<Document> collection) {
         this.collection = Objects.requireNonNull(collection, "collection nao pode ser null");
-        this.collection.createIndex(Indexes.ascending("name"));
     }
 
     private static MongoDatabase requireDatabase(MongoDatabase database) {
         return Objects.requireNonNull(database, "database nao pode ser null");
     }
 
-    /** Insere somente documentos ausentes; nunca substitui ou remove dados existentes. */
+    /**
+     * Inicializa o catálogo apenas quando chamado explicitamente.
+     * Insere somente documentos ausentes; nunca substitui ou remove dados existentes.
+     */
     public void ensureDefaultCatalog() {
+        collection.createIndex(Indexes.ascending("name"));
         for (Document seed : defaultCatalogDocuments()) {
             String id = seed.getString("_id");
             Document values = new Document(seed);
@@ -78,7 +79,8 @@ public class MongoMedicationRepository implements MedicationRepository {
         if (document == null) {
             return null;
         }
-        String id = document.getString("_id");
+        Object rawId = document.get("_id");
+        String id = rawId == null ? null : rawId.toString();
         String name = document.getString("name");
         if (name == null || name.isBlank()) {
             name = presentationName(document);
@@ -130,24 +132,17 @@ public class MongoMedicationRepository implements MedicationRepository {
             String dosageForm,
             int units,
             String manufacturer) {
-        MedicationPresentation presentation = new MedicationPresentation(
-                id,
-                ingredient,
-                concentration,
-                dosageForm,
-                units,
-                "caixa",
-                manufacturer,
-                Collections.<String, String>emptyMap());
-        return new Document("_id", presentation.getId())
-                .append("name", presentation.getDisplayName())
+        String name = ingredient + " " + concentration + " " + manufacturer
+                + " - " + units + " " + dosageForm;
+        return new Document("_id", id)
+                .append("name", name)
                 .append("catalogEntryType", "PRESENTATION")
-                .append("activeIngredient", presentation.getActiveIngredient())
-                .append("concentration", presentation.getConcentration())
-                .append("dosageForm", presentation.getDosageForm())
-                .append("unitCount", presentation.getUnitCount())
-                .append("packageType", presentation.getPackageType())
-                .append("manufacturer", presentation.getManufacturer())
+                .append("activeIngredient", ingredient)
+                .append("concentration", concentration)
+                .append("dosageForm", dosageForm)
+                .append("unitCount", units)
+                .append("packageType", "caixa")
+                .append("manufacturer", manufacturer)
                 .append("regulatoryIdentifiers", new Document())
                 .append("catalogSource", "ISSUE_6_EXPERIMENTAL_SAMPLE");
     }

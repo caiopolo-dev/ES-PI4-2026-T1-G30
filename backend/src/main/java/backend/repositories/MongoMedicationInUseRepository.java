@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.repositories;
 
 import backend.models.MedicamentoEmUso;
@@ -63,6 +64,7 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
     private boolean updateFields(String treatmentId, String userId, MedicamentoEmUso medication, boolean withSchedules) {
         Objects.requireNonNull(medication);
         Document changes = new Document();
+        // Atualizei apenas os campos do medicamento selecionado para preservar os outros do tratamento.
         for (var field : fields(medication).entrySet()) {
             changes.append("medications.$." + field.getKey(), field.getValue());
         }
@@ -74,8 +76,11 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
         // Preserva ID e estado; as versoes so mudam no fluxo de gravacao conjunta.
         Bson current = Filters.and(Filters.eq("id", medication.getId()), Filters.ne("active", false),
             revisionFilter(medication.getRevision()));
+        // A revisao entra no filtro: se outra edicao ja venceu, esta gravacao nao encontra correspondencia.
+        // Revisao e o numero da edicao; esse controle otimista detecta se outra gravacao mudou os dados antes desta.
         Bson filter = Filters.and(owner(treatmentId, userId), editable(medication), Filters.elemMatch("medications", current));
         return treatments.updateOne(filter, new Document("$set", changes)
+            // A atualizacao e atomica: os campos e a revisao deste documento mudam juntos, sem gravacao parcial.
             .append("$inc", new Document("medications.$.revision", 1L))).getMatchedCount() == 1;
     }
 
@@ -93,6 +98,7 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
         Document minimum = new Document("$cond", List.of(
             new Document("$eq", List.of("$status", "ACTIVE")), 1, minimumRemainingActive));
         // Um tratamento ativo deve manter outro medicamento ativo com cronograma.
+        // Conferi isso no MongoDB para duas desativacoes simultaneas nao deixarem o tratamento vazio.
         Bson remainingSchedule = Filters.or(Filters.ne("status", "ACTIVE"),
             Filters.elemMatch("medications", Filters.and(Filters.ne("id", medicationId),
                 Filters.ne("active", false), Filters.elemMatch("schedules", Filters.eq("active", true)))));
@@ -132,6 +138,7 @@ public final class MongoMedicationInUseRepository implements MedicationInUseRepo
     }
 
     private Bson owner(String treatmentId, String userId) {
+        // O filtro combina o ID do tratamento com o titular, sem confiar apenas no ID recebido.
         if (treatmentId == null || treatmentId.isBlank() || userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("Tratamento e titular obrigatorios.");
         }

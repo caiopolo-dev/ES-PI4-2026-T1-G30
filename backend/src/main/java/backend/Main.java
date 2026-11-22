@@ -26,14 +26,23 @@ public class Main {
         }
 
         // Conexão com o MongoDB
+        // Mantive o cliente aberto enquanto o servidor executa; o try fecha os recursos ao sair.
         try (MongoConnection mongoConnection = new MongoConnection()) {
 
             // Catálogo persistente de medicamentos, sem dependência de provedores externos.
             MongoMedicationRepository medicationRepository =
                     new MongoMedicationRepository(mongoConnection.getDatabase());
-            medicationRepository.ensureDefaultCatalog();
             MedicationService medicationService = new MedicationService(medicationRepository);
             MedicationHandler medicationHandler = new MedicationHandler(medicationService);
+
+            // Catálogo experimental somente leitura de apresentações farmacêuticas.
+            MedicationPresentationRepository medicationPresentationRepository =
+                    new MongoMedicationPresentationRepository(
+                            mongoConnection.getCollection("medication_presentations"));
+            MedicationPresentationService medicationPresentationService =
+                    new MedicationPresentationService(medicationPresentationRepository);
+            MedicationPresentationHandler medicationPresentationHandler =
+                    new MedicationPresentationHandler(medicationPresentationService);
 
             // Configuração dos repositories de doses usando a conexão MongoDB
             PlannedDoseRepository plannedDoseRepository =
@@ -60,9 +69,11 @@ public class Main {
             DoseHistoryService doseHistoryService =
                     new DoseHistoryService(plannedDoseRepository, doseRecordRepository);
 
+            // O handler recebe o servico pronto e fica responsavel apenas pela consulta HTTP do historico.
             HistoryHandler historyHandler = new HistoryHandler(doseHistoryService);
 
             // Configuração do cadastro de usuários
+            // Todos os servicos de usuarios recebem o repository da mesma collection e conexao.
             UserRepository userRepository =
                     new MongoUserRepository(mongoConnection.getCollection("users"));
 
@@ -127,6 +138,8 @@ public class Main {
             BearerTokenExtractor bearerTokenExtractor = new BearerTokenExtractor();
 
             // Usa a mesma sessao do login nas consultas privadas.
+            // Lambda e uma funcao escrita em linha; usei para ligar a validacao da sessao ao Router.
+            // Extraio o token, valido a sessao e entrego so o ID do usuario ao Router.
             SessionAuthenticator sessionAuthenticator = request -> bearerTokenExtractor.extract(request).flatMap(sessionService::resolve).map(session -> session.getUserId());
             AgendaHandler agendaHandler = new AgendaHandler(agendaService);
             AdherenceHandler adherenceHandler = new AdherenceHandler(adherenceService);
@@ -139,8 +152,14 @@ public class Main {
 
             // Configuração das rotas HTTP
             Router router = new Router(sessionAuthenticator);
+            StaticFileHandler staticFileHandler = new StaticFileHandler();
+            router.register("GET", "/", staticFileHandler);
+            router.register("GET", "/favicon.svg", staticFileHandler);
+            router.register("GET", "/assets/{file}", staticFileHandler);
             router.register("GET", "/health", new HealthHandler());
+            // Associei a rota ao handler para a requisicao chegar ao servico de medicamentos.
             router.register("GET", "/medications", medicationHandler);
+            router.register("GET", "/medication-presentations", medicationPresentationHandler);
             router.register("GET", "/doses", agendaHandler);
             // issue 32
             router.register("PUT", "/doses/{id}/record", doseRecordHandler);

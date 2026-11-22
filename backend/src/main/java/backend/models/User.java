@@ -1,15 +1,19 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.models;
 
 /** Representa os dados de um usuário, sem depender do MongoDB. */
 public final class User {
+    // Mantive os campos final para representar os dados recebidos sem altera-los depois da criacao.
     private final String id;
     private final String name;
     private final String email;
+    // Separei o email original da chave normalizada usada para busca e unicidade no banco.
     private final String emailNormalized;
 
     // Recebe os dados da senha já processada, nunca a senha original.
     private final String passwordHash;
     private final String passwordSalt;
+    // Guardei algoritmo e iteracoes para a autenticacao saber como verificar o hash armazenado.
     private final String passwordAlgorithm;
     private final int passwordIterations;
 

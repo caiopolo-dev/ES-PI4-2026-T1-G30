@@ -160,4 +160,38 @@ public class HttpResponseWriterTest {
         assertTrue(result.endsWith("\r\n\r\n" + response.getBody()));
     }
 
+    @Test
+    void preservesBinaryBodyAndLength() throws IOException {
+        byte[] body = new byte[] {0, 1, 2, (byte) 0xff, 10};
+        HttpResponse response = new HttpResponse(200, "OK", body, "application/octet-stream");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        new HttpResponseWriter().write(output, response);
+
+        byte[] written = output.toByteArray();
+        byte[] separator = "\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+        int bodyStart = indexOf(written, separator) + separator.length;
+        assertTrue(bodyStart >= separator.length);
+        assertArrayEquals(body, java.util.Arrays.copyOfRange(written, bodyStart, written.length));
+        String headers = new String(written, 0, bodyStart, StandardCharsets.US_ASCII);
+        assertTrue(headers.contains("Content-Type: application/octet-stream\r\n"));
+        assertTrue(headers.contains("Content-Length: 5\r\n"));
+    }
+
+    private int indexOf(byte[] source, byte[] target) {
+        for (int index = 0; index <= source.length - target.length; index++) {
+            boolean found = true;
+            for (int offset = 0; offset < target.length; offset++) {
+                if (source[index + offset] != target[offset]) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
 } 

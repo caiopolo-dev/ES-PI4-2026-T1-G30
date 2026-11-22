@@ -149,6 +149,7 @@ public class AdherenceService {
                     punctualityTolerance.toMinutes());
         }
 
+        // A busca em lote tambem confere o titular para o calculo nao usar registros de outra pessoa.
         Map<String, RegistroDeDose> recordsByDoseId =
                 doseRecordRepository.findByPlannedDoseIdsAndUserId(eligibleById.keySet(), normalizedUserId);
 

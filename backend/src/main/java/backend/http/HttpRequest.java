@@ -74,6 +74,7 @@ public class HttpRequest {
     }
 
     private HttpRequest(HttpRequest original, backend.auth.AuthContext context) {
+        // Copiei os dados para acrescentar a identidade validada sem modificar a requisicao original.
         this.method = original.method;
         this.path = original.path;
         this.rawQuery = original.rawQuery;
@@ -89,6 +90,7 @@ public class HttpRequest {
     }
 
     public java.util.Optional<backend.auth.AuthContext> getAuthContext() {
+        // Uma requisicao ainda nao autenticada pode nao ter contexto; o handler consegue conferir isso.
         return java.util.Optional.ofNullable(authContext);
     }
 }

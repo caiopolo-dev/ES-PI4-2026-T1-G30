@@ -135,3 +135,41 @@ correspondência nas doses do titular retornam lista vazia. Falhas técnicas ret
 O [contrato completo](docs/issue_35_contrato.md) detalha os campos e limites.
 A revisão conjunta com frontend e responsável pelos indicadores (#36) está
 **pendente**; os pontos para alinhamento estão no contrato.
+
+## React servido pelo Java
+
+O React é somente a interface. O build é copiado para o classpath pelo Maven e o
+servidor HTTP de `backend.Main` continua responsável tanto pelas páginas quanto
+pelas APIs e pelo acesso ao MongoDB. Não há servidor Node.js em produção.
+
+Pré-requisitos de build: Java 21, Maven, Node.js 22 e pnpm. Configure o MongoDB no
+mesmo terminal em que o Java será iniciado:
+
+```powershell
+$env:MONGODB_URI = "mongodb://127.0.0.1:27017"
+$env:MONGODB_DATABASE = "dosecerta"
+```
+
+Na primeira execução, ou após alterar o frontend, gere os arquivos estáticos:
+
+```powershell
+cd frontend
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+Depois, desligue o Vite e inicie apenas o servidor Java:
+
+```powershell
+cd ..\backend
+mvn clean compile exec:java -Dexec.mainClass=backend.Main
+```
+
+A aplicação completa fica disponível em `http://localhost:8080`. O Maven copia
+`frontend/dist` para `target/classes/web`; por isso o build do frontend deve existir
+antes de compilar o backend. Para usar outra porta, informe um único argumento ao
+`Main` (por exemplo, `-Dexec.args=8081`).
+
+O comando `pnpm dev` é opcional e exclusivo para desenvolvimento visual. Nesse
+modo, o proxy do Vite encaminha as rotas `/auth`, `/treatments`, `/doses`,
+`/adherence`, `/medications` e `/health` ao Java sem introduzir prefixo `/api`.

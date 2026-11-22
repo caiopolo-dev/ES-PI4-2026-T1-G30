@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import backend.models.Medication;
@@ -28,6 +29,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class MongoMedicationRepositoryTest {
+    @Test
+    void constructionDoesNotModifyThePersistentCatalog() {
+        MongoCollection<Document> collection = mockCollection();
+
+        new MongoMedicationRepository(collection);
+
+        verifyNoInteractions(collection);
+    }
+
     @Test
     void catalogPreservesTenPresentationsAndAddsFiftyCanonicalMedications() {
         List<Document> catalog = MongoMedicationRepository.defaultCatalogDocuments();

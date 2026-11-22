@@ -1,3 +1,4 @@
+// Desenvolvido por Miguel Gallinucci.
 package backend.handlers;
 
 import backend.http.HttpRequest;
@@ -19,6 +20,7 @@ import java.util.StringJoiner;
 /** Recebe a consulta HTTP e entrega os dados preparados pelo servico de historico. */
 public final class HistoryHandler implements HttpHandler {
 
+    // Aceitei apenas os filtros do contrato; userId nao entra aqui porque vem da sessao.
     private static final Set<String> PARAMETERS = Set.of(
         "from", "to", "treatmentId", "medicationInUseId"
     );
@@ -58,6 +60,7 @@ public final class HistoryHandler implements HttpHandler {
             parameters = parseQuery(request.getRawQuery());
             period = DoseHistoryPeriod.parse(parameters.get("from"), parameters.get("to"));
         } catch (IllegalArgumentException invalid) {
+            // Erros ao ler os parametros sao dados invalidos do cliente e recebem 400.
             return HttpResponse.badRequest("Parametros do historico invalidos.");
         }
 
@@ -79,12 +82,14 @@ public final class HistoryHandler implements HttpHandler {
 
         for (String pair : query.split("&", -1)) {
 
+            // Dividi so no primeiro sinal de igual para nao cortar um valor que tambem contenha esse caractere.
             String[] parts = pair.split("=", 2);
 
             if (parts.length != 2) {
                 throw new IllegalArgumentException("Parametro sem valor.");
             }
 
+            // Decodifiquei antes de conferir repeticoes para nomes equivalentes nao burlarem a validacao.
             String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
             String value = URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
 
@@ -99,6 +104,7 @@ public final class HistoryHandler implements HttpHandler {
     }
 
     private String toJson(DoseHistoryResponse response) {
+        // StringJoiner cuida das virgulas e devolve [] quando o periodo nao possui ocorrencias.
 
         StringJoiner items = new StringJoiner(",", "[", "]");
 
