@@ -11,7 +11,8 @@ info:
     \ recomendado. \n\n**HTTP**: uma requisição por conexão; servidor responde `Connection: close`. Não há suporte\
     \ a CORS/OPTIONS documentado no código atual. \n\n**Origem da modelagem anexa**: proposta de persistência (#14),\
     \ divergente do código atual em status do tratamento, quantidade inteira de MedicamentoEmUso e campos de vigência/snapshot.\
-    \ \n\n**Atenção**: não declarar contratos normalizados até que os handlers sejam alterados e testados."
+    \ \n\n**Atenção**: não declarar contratos normalizados até que os handlers sejam alterados e testados. A rota de apresentações\
+    \ experimentais foi adicionada na feature de integração do catálogo, sem alterar o contrato legado de `/medications`."
 servers:
 - url: http://localhost:8080
   description: Desenvolvimento local, porta padrão do Main.java. Outra porta pode ser passada por argumento.
@@ -19,6 +20,7 @@ tags:
 - name: Infraestrutura
 - name: Autenticação
 - name: Catálogo demonstrativo
+- name: Catálogo experimental
 - name: Tratamentos
 - name: Medicamentos em uso
 - name: Cronogramas
@@ -59,6 +61,37 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/CatalogMedication'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /medication-presentations:
+    get:
+      tags:
+      - Catálogo experimental
+      summary: Pesquisar apresentações experimentais
+      operationId: searchMedicationPresentations
+      description: Consulta somente leitura da collection medication_presentations. O catálogo é experimental, não
+        é uma base farmacêutica completa e não fornece recomendações de posologia. unitCount descreve exclusivamente
+        o conteúdo da embalagem e nunca representa quantityPerAdministration.
+      parameters:
+      - name: q
+        in: query
+        required: true
+        description: Nome comercial ou princípio ativo, entre 2 e 100 caracteres.
+        schema:
+          type: string
+          minLength: 2
+          maxLength: 100
+      responses:
+        '200':
+          description: Até 20 apresentações encontradas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicationPresentationSearchResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
         '401':
           $ref: '#/components/responses/Http401'
         '500':
@@ -787,6 +820,63 @@ components:
       - id
       - name
       description: Catálogo demonstrativo em memória; não é CMED nem busca de preços.
+    MedicationPresentation:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        activeIngredient:
+          type:
+          - string
+          - 'null'
+        concentration:
+          type:
+          - string
+          - 'null'
+        dosageForm:
+          type:
+          - string
+          - 'null'
+        manufacturer:
+          type:
+          - string
+          - 'null'
+        packageType:
+          type:
+          - string
+          - 'null'
+        unitCount:
+          type:
+          - integer
+          - 'null'
+          description: Conteúdo da embalagem; não é quantidade por administração.
+          minimum: 1
+      required:
+      - id
+      - name
+      - activeIngredient
+      - concentration
+      - dosageForm
+      - manufacturer
+      - packageType
+      - unitCount
+    MedicationPresentationSearchResponse:
+      type: object
+      properties:
+        catalog:
+          type: string
+          enum:
+          - EXPERIMENTAL
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/MedicationPresentation'
+      required:
+      - catalog
+      - items
     TreatmentStatus:
       type: string
       enum:
