@@ -90,6 +90,7 @@ public class Router {
                 // O contexto usa o ID da sessao, nao um userId escolhido no corpo ou na query.
                 return execute(handler, request.withAuthContext(new backend.auth.AuthContext(userId.get())));
             } catch (RuntimeException error) {
+                // Uma falha interna da autenticacao recebe 500; nao trato erro tecnico como credencial invalida.
                 return HttpResponse.internalServerError("Internal server error");
             }
         }

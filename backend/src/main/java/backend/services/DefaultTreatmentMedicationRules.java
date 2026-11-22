@@ -27,14 +27,20 @@ public final class DefaultTreatmentMedicationRules implements TreatmentMedicatio
     }
 
     @Override
+    // O servico de medicamentos chama antes do DELETE: ACTIVE precisa continuar com medicamento e cronograma valido.
+    // Por isso, retirar o ultimo medicamento valido e bloqueado; encerrar o tratamento e outro fluxo.
     public void validateDeactivation(AuthContext context, String treatmentId, MedicamentoEmUso medication) {
         Treatment treatment = editable(context, treatmentId);
+
         if (treatment.getStatus() == TreatmentStatus.ACTIVE && medication.isActive()) {
             var remaining = treatment.getMedications().stream()
                 .filter(m -> m.isActive() && !m.getId().equals(medication.getId())).toList();
+
             try {
-                // Simulei o tratamento sem esse medicamento para validar a desativacao antes de gravar.
-                // Reutiliza a validacao existente de tratamento ativo, sem alterar o original.
+                // Antes de desativar, monto uma copia do tratamento com os medicamentos que vao permanecer.
+                // O proprio modelo valida se essa copia ainda pode representar um tratamento ativo.
+                // Se nao puder, interrompo a operacao antes de gravar, mantendo o tratamento original intacto.
+                // Assim reutilizo a regra da #26 em vez de escrever uma segunda validacao diferente aqui.
                 new Treatment(treatment.getId(), treatment.getUserId(), treatment.getName(),
                     treatment.getDescription(), treatment.getStartDate(), treatment.getEndDate(),
                     treatment.getStatus(), treatment.getClosedAt(), remaining);
@@ -53,9 +59,11 @@ public final class DefaultTreatmentMedicationRules implements TreatmentMedicatio
     private Treatment editable(AuthContext context, String treatmentId) {
         // O encerramento preserva consultas, mas impede novas alteracoes nos medicamentos.
         Treatment treatment = treatments.find(context, treatmentId);
+
         if (treatment.getStatus() == TreatmentStatus.CLOSED) {
             throw new MedicationOperationConflictException("Tratamento encerrado nao permite alteracoes.");
         }
+
         return treatment;
     }
 

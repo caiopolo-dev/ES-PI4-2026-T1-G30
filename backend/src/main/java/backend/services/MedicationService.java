@@ -19,6 +19,7 @@ public class MedicationService {
         this.repository = Objects.requireNonNull(repository, "repository não pode ser null");
     }
 
+    // MedicationHandler chama esta operacao; o resultado e a lista encontrada no repository.
     public List<Medication> listMedications() {
         // A consulta fica no repository; o servico oferece a operacao sem depender de HTTP ou sockets.
         return repository.findAll();

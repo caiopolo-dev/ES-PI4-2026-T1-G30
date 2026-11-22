@@ -6,14 +6,17 @@ import org.bson.Document;
 
 /** Converte o usuário entre o modelo Java e o documento do MongoDB. */
 public final class UserDocumentMapper {
-    // Mapper e um conversor; usei para separar o modelo User do Document, que representa os campos BSON do MongoDB.
-    // Centralizei a conversao para gravacao e leitura seguirem os mesmos nomes e tipos de campos.
+    // Mapper e a classe que converte um formato em outro. Aqui recebo User e devolvo um Document para o MongoDB.
+    // Deixei essa conversao separada para User nao precisar conhecer nomes de campos ou classes do banco.
+    // O repository chama este metodo antes de inserir; na consulta, fromDocument faz o caminho de volta.
+    // Essa separacao ajuda a manter o mesmo formato de dados e a testar a conversao sem conectar ao banco.
     public Document toDocument(User user) {
         if (user == null) {
             throw new IllegalArgumentException("Usuário deve ser informado.");
         }
 
         // O id do Java é armazenado como _id no MongoDB.
+        // Os dados da senha ja chegam processados; este mapper so converte e valida, sem calcular o hash.
         return new Document("_id", readText(user.getId(), "_id"))
             .append("name", readText(user.getName(), "name"))
             .append("email", readText(user.getEmail(), "email"))
@@ -24,6 +27,7 @@ public final class UserDocumentMapper {
             .append("passwordIterations", readIterations(user.getPasswordIterations()));
     }
 
+    // Na consulta, faco o caminho inverso para o restante da aplicacao receber User, sem depender de BSON.
     public User fromDocument(Document document) {
         if (document == null) {
             throw new IllegalArgumentException("Documento de usuário deve ser informado.");
@@ -48,6 +52,7 @@ public final class UserDocumentMapper {
             // Informa apenas o campo inválido, sem mostrar seu conteúdo.
             throw new IllegalArgumentException("Campo de usuário inválido: " + field);
         }
+
         return (String) value;
     }
 
@@ -57,6 +62,7 @@ public final class UserDocumentMapper {
         if (!(value instanceof Integer) || ((Integer) value) <= 0) {
             throw new IllegalArgumentException("Campo de usuário inválido: passwordIterations");
         }
+
         return (Integer) value;
     }
 }

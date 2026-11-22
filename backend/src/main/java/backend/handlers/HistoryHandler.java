@@ -33,6 +33,7 @@ public final class HistoryHandler implements HttpHandler {
     }
 
     @Override
+    // Entrada HTTP do historico: valido a consulta, chamo DoseHistoryService e devolvo seus dados em JSON.
     public HttpResponse handle(HttpRequest request) {
 
         var context = request.getAuthContext().orElse(null);
@@ -94,6 +95,7 @@ public final class HistoryHandler implements HttpHandler {
             String value = URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
 
             if (!PARAMETERS.contains(key) || parameters.containsKey(key) || value.isBlank()) {
+                // Rejeitei repeticoes para nao escolher silenciosamente entre dois valores do mesmo filtro.
                 throw new IllegalArgumentException("Parametro desconhecido, repetido ou vazio.");
             }
 

@@ -37,6 +37,7 @@ public class MedicationHandler implements HttpHandler {
                 + ",\"name\":" + toJsonString(medication.getName()) + "}"
             );
         }
+        // Mesmo uma lista vazia e uma consulta bem-sucedida, por isso retorno 200 com [].
         return HttpResponse.ok(medicationsJson.toString());
     }
 
