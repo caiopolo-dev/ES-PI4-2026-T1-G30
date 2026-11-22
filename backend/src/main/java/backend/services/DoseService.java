@@ -29,35 +29,38 @@ public final class DoseService {
     }
 
     public RegistroDeDose recordDose(AuthContext context, String plannedDoseId, DoseAction action) {
-        validateAction(action);
 
-        DosePrevista plannedDose = accessService.find(context, plannedDoseId);
-        Optional<RegistroDeDose> existing = records.findByPlannedDoseId(plannedDose.getId());
-        if (existing.isPresent()) {
-            return applyExistingRecordPolicy(existing.get(), context.userId(), action);
-        }
+        synchronized (TreatmentMutationLock.MONITOR) {
+            validateAction(action);
 
-        if (plannedDose.getStatus() == ScheduleStatus.CANCELLED) {
-            throw new DoseRecordConflictException("Dose cancelada nao pode receber registro.");
-        }
-
-        Instant recordedAt = clock.instant();
-        Instant actualTime = action == DoseAction.TAKEN ? recordedAt : null;
-        RegistroDeDose candidate = new RegistroDeDose(null, plannedDose.getId(), context.userId(), action, actualTime, recordedAt);
-
-        RegistroDeDose persisted;
-        try {
-            persisted = records.save(candidate);
-
-        } catch (IllegalStateException error) {
-            Optional<RegistroDeDose> winner = records.findByPlannedDoseId(plannedDose.getId());
-
-            if (winner.isPresent() && context.userId().equals(winner.get().getUserId()) && winner.get().getAction() != action) {
-                throw new DoseRecordConflictException("Dose ja possui registro com outra acao.");
+            DosePrevista plannedDose = accessService.find(context, plannedDoseId);
+            Optional<RegistroDeDose> existing = records.findByPlannedDoseId(plannedDose.getId());
+            if (existing.isPresent()) {
+                return applyExistingRecordPolicy(existing.get(), context.userId(), action);
             }
-            throw error;
+
+            if (plannedDose.getStatus() == ScheduleStatus.CANCELLED) {
+                throw new DoseRecordConflictException("Dose cancelada nao pode receber registro.");
+            }
+
+            Instant recordedAt = clock.instant();
+            Instant actualTime = action == DoseAction.TAKEN ? recordedAt : null;
+            RegistroDeDose candidate = new RegistroDeDose(null, plannedDose.getId(), context.userId(), action, actualTime, recordedAt);
+
+            RegistroDeDose persisted;
+            try {
+                persisted = records.save(candidate);
+
+            } catch (IllegalStateException error) {
+                Optional<RegistroDeDose> winner = records.findByPlannedDoseId(plannedDose.getId());
+
+                if (winner.isPresent() && context.userId().equals(winner.get().getUserId()) && winner.get().getAction() != action) {
+                    throw new DoseRecordConflictException("Dose ja possui registro com outra acao.");
+                }
+                throw error;
+            }
+            return applyExistingRecordPolicy(persisted, context.userId(), action);
         }
-        return applyExistingRecordPolicy(persisted, context.userId(), action);
     }
 
     public DosePrevista findPlannedDose(AuthContext context, String plannedDoseId) {

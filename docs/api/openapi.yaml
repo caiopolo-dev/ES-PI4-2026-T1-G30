@@ -1,0 +1,1608 @@
+openapi: 3.1.0
+info:
+  title: DoseCerta — API HTTP do backend (contrato observado na develop)
+  version: 0.1.0-develop-dfe4117
+  description: "Contrato descritivo (as-is), extraído estaticamente dos handlers e serviços Java 21 da branch develop,\
+    \ commit dfe4117ef5239359ef1c3f9d084746ca47067785. Não é uma proposta de mudanças nem garantia de aprovação dos\
+    \ testes atuais. O contrato documenta diferenças existentes de representação; elas devem ser tratadas antes de\
+    \ declarar uma interface padronizada. \n\n**Fontes**: Main.java, handlers, models, services e documentação de\
+    \ issues 27/35. \n\n**Autenticação**: Bearer token criado por POST /auth/login, enviado em Authorization. \n\n\
+    **Datas**: yyyy-MM-dd são datas locais; Instants de vigência/ocorrências são serializados em ISO 8601, UTC `Z`\
+    \ recomendado. \n\n**HTTP**: uma requisição por conexão; servidor responde `Connection: close`. Não há suporte\
+    \ a CORS/OPTIONS documentado no código atual. \n\n**Origem da modelagem anexa**: proposta de persistência (#14),\
+    \ divergente do código atual em status do tratamento, quantidade inteira de MedicamentoEmUso e campos de vigência/snapshot.\
+    \ \n\n**Atenção**: não declarar contratos normalizados até que os handlers sejam alterados e testados. A rota de apresentações\
+    \ experimentais foi adicionada na feature de integração do catálogo, sem alterar o contrato legado de `/medications`."
+servers:
+- url: http://localhost:8080
+  description: Desenvolvimento local, porta padrão do Main.java. Outra porta pode ser passada por argumento.
+tags:
+- name: Infraestrutura
+- name: Autenticação
+- name: Catálogo demonstrativo
+- name: Catálogo experimental
+- name: Tratamentos
+- name: Medicamentos em uso
+- name: Cronogramas
+- name: Agenda e registro
+- name: Adesão
+security:
+- BearerAuth: []
+paths:
+  /health:
+    get:
+      tags:
+      - Infraestrutura
+      summary: Verificar o funcionamento do processo HTTP
+      operationId: getHealth
+      description: Indica que o processo atende HTTP, não que MongoDB está saudável neste instante.
+      security: []
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /medications:
+    get:
+      tags:
+      - Catálogo demonstrativo
+      summary: Listar medicamentos de exemplo
+      operationId: listCatalogMedications
+      description: Atualmente usa InMemoryMedicationRepository com dois itens fixos; exige Bearer pelo RouteAccessPolicy,
+        não é serviço de preço nem CMED.
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogMedication'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /medication-presentations:
+    get:
+      tags:
+      - Catálogo experimental
+      summary: Pesquisar apresentações experimentais
+      operationId: searchMedicationPresentations
+      description: Consulta somente leitura da collection medication_presentations. O catálogo é experimental, não
+        é uma base farmacêutica completa e não fornece recomendações de posologia. unitCount descreve exclusivamente
+        o conteúdo da embalagem e nunca representa quantityPerAdministration.
+      parameters:
+      - name: q
+        in: query
+        required: true
+        description: Nome comercial ou princípio ativo, entre 2 e 100 caracteres.
+        schema:
+          type: string
+          minLength: 2
+          maxLength: 100
+      responses:
+        '200':
+          description: Até 20 apresentações encontradas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicationPresentationSearchResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /auth/register:
+    post:
+      tags:
+      - Autenticação
+      summary: Cadastrar usuário
+      operationId: registerUser
+      security: []
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              name: Maria Oliveira
+              email: maria@example.com
+              password: senha-de-exemplo
+      responses:
+        '201':
+          description: Recurso criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /auth/login:
+    post:
+      tags:
+      - Autenticação
+      summary: Iniciar sessão
+      operationId: login
+      security: []
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: maria@example.com
+              password: senha-de-exemplo
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '429':
+          $ref: '#/components/responses/Http429'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /auth/me:
+    get:
+      tags:
+      - Autenticação
+      summary: Consultar usuário da sessão
+      operationId: getMe
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /auth/logout:
+    post:
+      tags:
+      - Autenticação
+      summary: Revogar sessão
+      operationId: logout
+      description: Resposta sem corpo. A sessão precisa existir na autenticação aplicada pelo Router.
+      responses:
+        '204':
+          description: Sem conteúdo
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments:
+    get:
+      tags:
+      - Tratamentos
+      summary: Listar tratamentos do titular
+      operationId: listTreatments
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TreatmentResponse'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+    post:
+      tags:
+      - Tratamentos
+      summary: Criar tratamento em DRAFT
+      operationId: createTreatment
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TreatmentCreateRequest'
+            example:
+              name: Tratamento A
+              description: Acompanhamento
+              startDate: '2026-12-01'
+              endDate: null
+      responses:
+        '201':
+          description: Recurso criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments/{id}:
+    parameters:
+    - &id001
+      name: id
+      in: path
+      required: true
+      description: Identificador do tratamento.
+      schema:
+        type: string
+        minLength: 1
+    get:
+      tags:
+      - Tratamentos
+      summary: Consultar tratamento com medicamentos e cronogramas resumidos
+      operationId: getTreatment
+      description: 'Importante: a serialização de cronogramas aninhados NÃO contém frequência, vigências ou snapshots.
+        Para versão completa use GET .../schedule.'
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentResponse'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '500':
+          $ref: '#/components/responses/Http500'
+    put:
+      tags:
+      - Tratamentos
+      summary: Substituir metadados editáveis
+      operationId: updateTreatment
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TreatmentUpdateRequest'
+            example:
+              name: Tratamento A
+              description: null
+              startDate: '2026-12-01'
+              endDate: null
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments/{id}/activate:
+    parameters:
+    - *id001
+    post:
+      tags:
+      - Tratamentos
+      summary: Ativar tratamento e reconciliar doses
+      operationId: activateTreatment
+      description: POST sem corpo. Requer tratamento válido e ao menos um cronograma elegível. A geração de doses
+        ocorre após persistir estado.
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments/{id}/close:
+    parameters:
+    - *id001
+    post:
+      tags:
+      - Tratamentos
+      summary: Encerrar tratamento e cancelar doses futuras
+      operationId: closeTreatment
+      description: POST sem corpo. O encerramento é persistido antes da reconciliação das doses.
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments/{id}/medications:
+    parameters:
+    - *id001
+    post:
+      tags:
+      - Medicamentos em uso
+      summary: Adicionar medicamento a tratamento
+      operationId: addTreatmentMedication
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationCreateRequest'
+            example:
+              name: Losartana
+              informedDose: 50 mg
+              quantityPerAdministration: 1
+              unit: comprimido
+              notes: null
+      responses:
+        '201':
+          description: Recurso criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicationResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments/{id}/medications/{medicationId}:
+    parameters:
+    - *id001
+    - &id002
+      name: medicationId
+      in: path
+      required: true
+      description: Identificador do medicamento embutido no tratamento.
+      schema:
+        type: string
+        minLength: 1
+    put:
+      tags:
+      - Medicamentos em uso
+      summary: Editar medicamento (simples ou com nova vigência)
+      operationId: updateTreatmentMedication
+      description: Quando quantity/unit muda e há cronogramas, validFrom futuro é exigido para nova versão. Em outras
+        edições, omitir validFrom.
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationUpdateRequest'
+            example:
+              name: Losartana
+              informedDose: 50 mg
+              quantityPerAdministration: 2
+              unit: comprimido
+              notes: null
+              revision: 1
+              validFrom: '2026-12-02T11:00:00Z'
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicationResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+    delete:
+      tags:
+      - Medicamentos em uso
+      summary: Desativar medicamento sem apagar histórico
+      operationId: deactivateTreatmentMedication
+      description: Exclusão lógica, sem corpo. Regras do tratamento podem proibir desativar o último medicamento elegível.
+      responses:
+        '204':
+          description: Sem conteúdo
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /treatments/{id}/medications/{medicationId}/schedule:
+    parameters:
+    - *id001
+    - *id002
+    get:
+      tags:
+      - Cronogramas
+      summary: Consultar versão vigente e histórico completo
+      operationId: getMedicationSchedule
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+    put:
+      tags:
+      - Cronogramas
+      summary: Criar nova versão de cronograma com revisão otimista
+      operationId: updateMedicationSchedule
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchedulePutRequest'
+            example:
+              frequency: EVERY_DAY
+              daysOfWeek: null
+              times:
+              - 08:00
+              - '20:00'
+              startDate: '2026-12-01'
+              endDate: null
+              timezone: America/Sao_Paulo
+              validFrom: '2026-12-01T11:00:00Z'
+              revision: 0
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /doses:
+    get:
+      tags:
+      - Agenda e registro
+      summary: Consultar agenda por data local
+      operationId: getDailyAgenda
+      description: Somente leitura; não gera doses. Omitidas ocorrências CANCELLED. displayStatus é derivado de horário
+        e RegistroDeDose.
+      parameters:
+      - name: date
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          example: '2026-12-01'
+        description: Data local no formato yyyy-MM-dd, exatamente um parâmetro; fuso America/Sao_Paulo.
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyAgendaResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /doses/{id}/record:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      description: ID de DosePrevista.
+      schema:
+        type: string
+        minLength: 1
+    put:
+      tags:
+      - Agenda e registro
+      summary: Registrar ação TAKEN ou SKIPPED em dose
+      operationId: recordDose
+      description: Ação idempotente para mesma dose e mesmo valor. Ações contraditórias recebem 409. O servidor determina
+        actualTime/recordedAt.
+      requestBody:
+        description: Corpo JSON.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DoseRecordRequest'
+            example:
+              action: TAKEN
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DoseRecordResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '404':
+          $ref: '#/components/responses/Http404'
+        '409':
+          $ref: '#/components/responses/Http409'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /adherence/summary:
+    get:
+      tags:
+      - Adesão
+      summary: Calcular indicadores de execução e pontualidade
+      operationId: getAdherenceSummary
+      description: Datas inclusivas, America/Sao_Paulo; somente doses agendadas já vencidas entram no denominador;
+        sem dados, percentuais null e status NO_DATA. Sem limite de 90 dias no handler deste endpoint.
+      parameters:
+      - &id003
+        name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          example: '2026-12-01'
+        description: Início do período local inclusivo.
+      - &id004
+        name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          example: '2026-12-01'
+        description: Fim do período local inclusivo.
+      - &id005
+        name: treatmentId
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+        description: Filtra doses pertencentes a este tratamento do usuário autenticado.
+      - &id006
+        name: medicationInUseId
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+        description: Filtra por medicamento.
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdherenceSummaryResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+  /adherence/history:
+    get:
+      tags:
+      - Adesão
+      summary: Consultar histórico de doses e registros
+      operationId: getDoseHistory
+      description: Intervalo local inclusivo de 1 a 90 dias no fuso America/Sao_Paulo. Inclui doses futuras e canceladas;
+        não registra ações. Sem paginação.
+      parameters:
+      - *id003
+      - *id004
+      - *id005
+      - *id006
+      responses:
+        '200':
+          description: Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryResponse'
+        '400':
+          $ref: '#/components/responses/Http400'
+        '401':
+          $ref: '#/components/responses/Http401'
+        '500':
+          $ref: '#/components/responses/Http500'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Token opaco de sessão emitido em POST /auth/login.
+  responses:
+    Http400:
+      description: Parâmetros ou corpo inválidos.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Http401:
+      description: Sessão ausente, inválida ou expirada.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Http404:
+      description: Recurso não encontrado ou pertencente a outro usuário.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Http405:
+      description: Método não permitido na rota.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Http409:
+      description: Conflito de estado, revisão ou ação.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Http429:
+      description: Limite de tentativas de login atingido.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Http500:
+      description: Falha interna.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Mensagem genérica; não depende dela para lógica de interface.
+      required:
+      - error
+      additionalProperties: false
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+      required:
+      - status
+      additionalProperties: false
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+      required:
+      - id
+      - name
+      - email
+    LoginResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        token:
+          type: string
+          description: 'Token de sessão usado em Authorization: Bearer <token>.'
+      required:
+      - id
+      - name
+      - email
+      - token
+    RegisterRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+      required:
+      - name
+      - email
+      - password
+      description: O handler exige strings para estes três campos; validações semânticas adicionais ficam no serviço.
+        Campos extras não são explicitamente rejeitados pelo handler atual.
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required:
+      - email
+      - password
+      description: O handler exige email e password textuais.
+    CatalogMedication:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required:
+      - id
+      - name
+      description: Catálogo demonstrativo em memória; não é CMED nem busca de preços.
+    MedicationPresentation:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        activeIngredient:
+          type:
+          - string
+          - 'null'
+        concentration:
+          type:
+          - string
+          - 'null'
+        dosageForm:
+          type:
+          - string
+          - 'null'
+        manufacturer:
+          type:
+          - string
+          - 'null'
+        packageType:
+          type:
+          - string
+          - 'null'
+        unitCount:
+          type:
+          - integer
+          - 'null'
+          description: Conteúdo da embalagem; não é quantidade por administração.
+          minimum: 1
+      required:
+      - id
+      - name
+      - activeIngredient
+      - concentration
+      - dosageForm
+      - manufacturer
+      - packageType
+      - unitCount
+    MedicationPresentationSearchResponse:
+      type: object
+      properties:
+        catalog:
+          type: string
+          enum:
+          - EXPERIMENTAL
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/MedicationPresentation'
+      required:
+      - catalog
+      - items
+    TreatmentStatus:
+      type: string
+      enum:
+      - DRAFT
+      - ACTIVE
+      - CLOSED
+    Frequency:
+      type: string
+      enum:
+      - EVERY_DAY
+      - DAYS_OF_WEEK
+    DoseAction:
+      type: string
+      enum:
+      - TAKEN
+      - SKIPPED
+    ScheduleStatus:
+      type: string
+      enum:
+      - SCHEDULED
+      - CANCELLED
+    DisplayStatus:
+      type: string
+      enum:
+      - UPCOMING
+      - DUE
+      - OVERDUE
+      - TAKEN
+      - SKIPPED
+    Revision:
+      type: integer
+      description: Revisão otimista do medicamento. Em PUT, enviar a última revisão conhecida; retorna 409 se obsoleta.
+      format: int64
+      minimum: 0
+      maximum: 9223372036854775806
+    IntegerQuantity:
+      type:
+      - integer
+      - 'null'
+      format: int32
+      minimum: 1
+      description: O domínio atual aceita apenas inteiro positivo ou null (em DRAFT). Não aceita 0,5.
+    TimeHHmm:
+      type: string
+      description: Hora civil local, sem offset.
+      pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+      example: 08:00
+    NullableDate:
+      type:
+      - string
+      - 'null'
+      format: date
+      description: Data local inclusiva do calendário, sem hora.
+      example: '2026-12-01'
+    NullableInstant:
+      type:
+      - string
+      - 'null'
+      format: date-time
+      description: Instante de vigência; UTC com Z recomendado.
+      example: '2026-12-01T11:00:00Z'
+    TreatmentEmbeddedSchedule:
+      type: object
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        daysOfWeek:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+        times:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeHHmm'
+        startDate:
+          type: string
+          format: date
+          example: '2026-12-01'
+        endDate:
+          $ref: '#/components/schemas/NullableDate'
+        timezone:
+          type: string
+          example: America/Sao_Paulo
+        active:
+          type: boolean
+      required:
+      - version
+      - daysOfWeek
+      - times
+      - startDate
+      - endDate
+      - timezone
+      - active
+      description: Representação reduzida EXISTENTE em TreatmentHandler.toDocument; não contém frequency, validFrom,
+        validTo nem snapshots. Não deduzir vigência a partir deste objeto.
+    TreatmentEmbeddedMedication:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        dose:
+          type: string
+        quantity:
+          $ref: '#/components/schemas/IntegerQuantity'
+        unit:
+          type:
+          - string
+          - 'null'
+        active:
+          type: boolean
+        revision:
+          $ref: '#/components/schemas/Revision'
+        observations:
+          type:
+          - string
+          - 'null'
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/TreatmentEmbeddedSchedule'
+      required:
+      - id
+      - name
+      - dose
+      - quantity
+      - unit
+      - active
+      - revision
+      - observations
+      - schedules
+      description: 'Formato EXISTENTE em GET /treatments e GET /treatments/{id}: dose/quantity/observations (não os
+        nomes do MedicationInUseHandler).'
+    TreatmentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+          description: Identidade derivada da sessão; nunca enviada pelo cliente.
+        name:
+          type:
+          - string
+          - 'null'
+        description:
+          type:
+          - string
+          - 'null'
+        startDate:
+          $ref: '#/components/schemas/NullableDate'
+        endDate:
+          $ref: '#/components/schemas/NullableDate'
+        status:
+          $ref: '#/components/schemas/TreatmentStatus'
+        closedAt:
+          $ref: '#/components/schemas/NullableInstant'
+        medications:
+          type: array
+          items:
+            $ref: '#/components/schemas/TreatmentEmbeddedMedication'
+      required:
+      - id
+      - userId
+      - name
+      - description
+      - startDate
+      - endDate
+      - status
+      - closedAt
+      - medications
+    TreatmentCreateRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+        description:
+          type:
+          - string
+          - 'null'
+        startDate:
+          $ref: '#/components/schemas/NullableDate'
+        endDate:
+          $ref: '#/components/schemas/NullableDate'
+      additionalProperties: false
+      description: Todos os campos são opcionais no DRAFT; outros campos são rejeitados. userId não é aceito.
+    TreatmentUpdateRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+        description:
+          type:
+          - string
+          - 'null'
+        startDate:
+          $ref: '#/components/schemas/NullableDate'
+        endDate:
+          $ref: '#/components/schemas/NullableDate'
+      required:
+      - name
+      - description
+      - startDate
+      - endDate
+      additionalProperties: false
+      description: 'PUT completo: as quatro chaves são obrigatórias, mesmo quando o valor for null. Em ACTIVE o período
+        não pode mudar.'
+    MedicationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        informedDose:
+          type: string
+        quantityPerAdministration:
+          $ref: '#/components/schemas/IntegerQuantity'
+        unit:
+          type:
+          - string
+          - 'null'
+        notes:
+          type:
+          - string
+          - 'null'
+        active:
+          type: boolean
+        revision:
+          $ref: '#/components/schemas/Revision'
+      required:
+      - id
+      - name
+      - informedDose
+      - quantityPerAdministration
+      - unit
+      - notes
+      - active
+      - revision
+      description: Formato EXISTENTE nas respostas de POST/PUT de medicamentos.
+    MedicationCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        informedDose:
+          type: string
+        quantityPerAdministration:
+          $ref: '#/components/schemas/IntegerQuantity'
+        unit:
+          type:
+          - string
+          - 'null'
+        notes:
+          type:
+          - string
+          - 'null'
+      required:
+      - name
+      - informedDose
+      additionalProperties: false
+      description: Quantidade/unidade podem faltar no DRAFT. Em ACTIVE a validação exige posologia completa. Campos
+        extras são rejeitados, revision e validFrom não permitidos.
+    MedicationUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        informedDose:
+          type: string
+        quantityPerAdministration:
+          $ref: '#/components/schemas/IntegerQuantity'
+        unit:
+          type:
+          - string
+          - 'null'
+        notes:
+          type:
+          - string
+          - 'null'
+        revision:
+          $ref: '#/components/schemas/Revision'
+        validFrom:
+          type: string
+          format: date-time
+          description: Se informado, deve ser um instante válido e futuro; null recebe 400.
+          example: '2026-12-01T11:00:00Z'
+      required:
+      - name
+      - informedDose
+      - revision
+      additionalProperties: false
+      description: PUT envia representação completa dos campos editáveis; campos opcionais omitidos tornam-se null.
+        validFrom presente (não null) aciona atualização versionada e só é aceito quando quantity/unit muda. Sem validFrom,
+        alteração de posologia com cronogramas existentes recebe 409.
+    ScheduleVersion:
+      type: object
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        quantitySnapshot:
+          $ref: '#/components/schemas/IntegerQuantity'
+        unitSnapshot:
+          type:
+          - string
+          - 'null'
+        frequency:
+          $ref: '#/components/schemas/Frequency'
+        daysOfWeek:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+            enum:
+            - MONDAY
+            - TUESDAY
+            - WEDNESDAY
+            - THURSDAY
+            - FRIDAY
+            - SATURDAY
+            - SUNDAY
+        times:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeHHmm'
+        startDate:
+          type: string
+          format: date
+          example: '2026-12-01'
+        endDate:
+          $ref: '#/components/schemas/NullableDate'
+        timezone:
+          type: string
+          example: America/Sao_Paulo
+        active:
+          type: boolean
+        validFrom:
+          $ref: '#/components/schemas/NullableInstant'
+        validTo:
+          $ref: '#/components/schemas/NullableInstant'
+      required:
+      - version
+      - quantitySnapshot
+      - unitSnapshot
+      - frequency
+      - daysOfWeek
+      - times
+      - startDate
+      - endDate
+      - timezone
+      - active
+      - validFrom
+      - validTo
+      description: Versão completa retornada pelo ScheduleHandler. Snapshots podem ser null para documentos legados.
+    ScheduleResponse:
+      type: object
+      properties:
+        treatmentId:
+          type: string
+        medicationId:
+          type: string
+        revision:
+          $ref: '#/components/schemas/Revision'
+        current:
+          oneOf:
+          - $ref: '#/components/schemas/ScheduleVersion'
+          - type: 'null'
+          description: Versão vigente agora; pode ser null se nenhuma versão cobrir o instante atual.
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleVersion'
+      required:
+      - treatmentId
+      - medicationId
+      - revision
+      - current
+      - versions
+    SchedulePutRequest:
+      type: object
+      properties:
+        frequency:
+          $ref: '#/components/schemas/Frequency'
+        daysOfWeek:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+            enum:
+            - MONDAY
+            - TUESDAY
+            - WEDNESDAY
+            - THURSDAY
+            - FRIDAY
+            - SATURDAY
+            - SUNDAY
+        times:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeHHmm'
+        startDate:
+          type: string
+          format: date
+          example: '2026-12-01'
+        endDate:
+          $ref: '#/components/schemas/NullableDate'
+        timezone:
+          type: string
+          example: America/Sao_Paulo
+        validFrom:
+          type: string
+          format: date-time
+          description: Quando a nova versão começa a valer (Instant).
+          example: '2026-12-01T11:00:00Z'
+        revision:
+          $ref: '#/components/schemas/Revision'
+      required:
+      - frequency
+      - times
+      - startDate
+      - timezone
+      - validFrom
+      - revision
+      additionalProperties: false
+      description: Para DAYS_OF_WEEK, daysOfWeek deve ser lista não vazia; para EVERY_DAY usa-se null/omissão. O servidor
+        controla version, active, validTo e snapshots. Em tratamento ACTIVE, validFrom não pode estar no passado.
+        Há limites de vigência do tratamento/cronograma.
+    DailyRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        action:
+          $ref: '#/components/schemas/DoseAction'
+        actualTime:
+          $ref: '#/components/schemas/NullableInstant'
+        recordedAt:
+          type: string
+          format: date-time
+          example: '2026-12-01T11:00:00Z'
+      required:
+      - id
+      - action
+      - actualTime
+      - recordedAt
+    DailyDose:
+      type: object
+      properties:
+        id:
+          type: string
+        treatmentId:
+          type: string
+        medicationInUseId:
+          type: string
+        medicationName:
+          type: string
+        plannedQuantity:
+          type: number
+          description: Número JSON derivado de BigDecimal; unidade não é incluída no item.
+          minimum: 0
+        scheduledAt:
+          type: string
+          format: date-time
+          example: '2026-12-01T11:00:00Z'
+        scheduledLocalTime:
+          $ref: '#/components/schemas/TimeHHmm'
+        scheduleStatus:
+          $ref: '#/components/schemas/ScheduleStatus'
+        record:
+          oneOf:
+          - $ref: '#/components/schemas/DailyRecord'
+          - type: 'null'
+        displayStatus:
+          $ref: '#/components/schemas/DisplayStatus'
+      required:
+      - id
+      - treatmentId
+      - medicationInUseId
+      - medicationName
+      - plannedQuantity
+      - scheduledAt
+      - scheduledLocalTime
+      - scheduleStatus
+      - record
+      - displayStatus
+    DailyAgendaResponse:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: '2026-12-01'
+        timezone:
+          type: string
+        doses:
+          type: array
+          items:
+            $ref: '#/components/schemas/DailyDose'
+      required:
+      - date
+      - timezone
+      - doses
+      description: Consulta somente leitura. Canceldas não são incluídas na agenda de doses devidas; não há paginação.
+    DoseRecordRequest:
+      type: object
+      properties:
+        action:
+          $ref: '#/components/schemas/DoseAction'
+      required:
+      - action
+      additionalProperties: false
+    DoseRecordResponse:
+      type: object
+      properties:
+        plannedDoseId:
+          type: string
+        action:
+          $ref: '#/components/schemas/DoseAction'
+        scheduledAt:
+          type: string
+          format: date-time
+          example: '2026-12-01T11:00:00Z'
+        scheduleVersion:
+          type: integer
+          minimum: 1
+        actualTime:
+          $ref: '#/components/schemas/NullableInstant'
+        recordedAt:
+          type: string
+          format: date-time
+          example: '2026-12-01T11:00:00Z'
+      required:
+      - plannedDoseId
+      - action
+      - scheduledAt
+      - scheduleVersion
+      - actualTime
+      - recordedAt
+    AdherenceSummaryResponse:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+              example: '2026-12-01'
+            to:
+              type: string
+              format: date
+              example: '2026-12-01'
+          required:
+          - from
+          - to
+        filters:
+          type: object
+          properties:
+            treatmentId:
+              type:
+              - string
+              - 'null'
+            medicationInUseId:
+              type:
+              - string
+              - 'null'
+          required:
+          - treatmentId
+          - medicationInUseId
+        eligiblePlannedDoses:
+          type: integer
+          minimum: 0
+        takenDoses:
+          type: integer
+          minimum: 0
+        skippedDoses:
+          type: integer
+          minimum: 0
+        unrecordedOverdueDoses:
+          type: integer
+          minimum: 0
+        onTimeTakenDoses:
+          type: integer
+          minimum: 0
+        lateTakenDoses:
+          type: integer
+          minimum: 0
+        executionPercent:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          maximum: 100
+        punctualityPercent:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          maximum: 100
+        executionStatus:
+          type: string
+          enum:
+          - OK
+          - NO_DATA
+        punctualityStatus:
+          type: string
+          enum:
+          - OK
+          - NO_DATA
+        punctualityToleranceMinutes:
+          type: integer
+          minimum: 0
+      required:
+      - period
+      - filters
+      - eligiblePlannedDoses
+      - takenDoses
+      - skippedDoses
+      - unrecordedOverdueDoses
+      - onTimeTakenDoses
+      - lateTakenDoses
+      - executionPercent
+      - punctualityPercent
+      - executionStatus
+      - punctualityStatus
+      - punctualityToleranceMinutes
+      description: 'eligible: SCHEDULED com scheduledAt <= referência; percentuais null quando não há dados. Intervalos
+        locais inclusivos no fuso America/Sao_Paulo.'
+    HistoryItem:
+      type: object
+      properties:
+        plannedDoseId:
+          type: string
+        treatmentId:
+          type: string
+        medicationInUseId:
+          type: string
+        medicationName:
+          type:
+          - string
+          - 'null'
+        scheduleVersion:
+          type: integer
+          minimum: 1
+        scheduledAt:
+          type: string
+          format: date-time
+          example: '2026-12-01T11:00:00Z'
+        scheduleTimezone:
+          type: string
+        plannedQuantity:
+          type: number
+          minimum: 0
+        plannedUnit:
+          type: 'null'
+          description: 'Sempre null nesta implementação: unidade não persistida em DosePrevista.'
+        action:
+          type:
+          - string
+          - 'null'
+          enum:
+          - TAKEN
+          - SKIPPED
+          - null
+        actualTime:
+          $ref: '#/components/schemas/NullableInstant'
+        recordedAt:
+          $ref: '#/components/schemas/NullableInstant'
+        isCancelled:
+          type: boolean
+      required:
+      - plannedDoseId
+      - treatmentId
+      - medicationInUseId
+      - medicationName
+      - scheduleVersion
+      - scheduledAt
+      - scheduleTimezone
+      - plannedQuantity
+      - plannedUnit
+      - action
+      - actualTime
+      - recordedAt
+      - isCancelled
+    HistoryResponse:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date
+          example: '2026-12-01'
+        to:
+          type: string
+          format: date
+          example: '2026-12-01'
+        timezone:
+          type: string
+          example: America/Sao_Paulo
+        referenceTime:
+          type: string
+          format: date-time
+          example: '2026-12-01T11:00:00Z'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryItem'
+      required:
+      - from
+      - to
+      - timezone
+      - referenceTime
+      - items
+      description: Inclui doses futuras e canceladas, sem mutações; período local inclusivo de até 90 dias.
+x-source-revision:
+  branch: develop
+  sha: dfe4117ef5239359ef1c3f9d084746ca47067785
+  checkedAt: '2026-11-22'
+  type: static-code-review

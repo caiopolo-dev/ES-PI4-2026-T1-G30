@@ -16,7 +16,7 @@ import java.util.Map;
 public class HttpResponseWriter {
     public void write(OutputStream output, HttpResponse response) throws IOException {
         //Converter o corpo da resposta para bytes
-        byte[] bodyBytes = response.getBody().getBytes(StandardCharsets.UTF_8);
+        byte[] bodyBytes = response.getBodyBytes();
 
         StringBuilder responseHead = new StringBuilder();
 
