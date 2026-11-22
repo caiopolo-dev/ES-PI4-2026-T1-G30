@@ -25,17 +25,15 @@ public class Main {
             porta = Integer.parseInt(args[0]);
         }
 
-        // Configuração dos medicamentos
-        // Montei as dependencias aqui para cada classe receber apenas o que precisa usar.
-        // A listagem inicial continua usando o repository em memoria.
-        MedicationRepository medicationRepository = new InMemoryMedicationRepository();
-        MedicationService medicationService = new MedicationService(medicationRepository);
-        MedicationHandler medicationHandler = new MedicationHandler(medicationService);
-
-
         // Conexão com o MongoDB
         // Mantive o cliente aberto enquanto o servidor executa; o try fecha os recursos ao sair.
         try (MongoConnection mongoConnection = new MongoConnection()) {
+
+            // Catálogo persistente de medicamentos, sem dependência de provedores externos.
+            MongoMedicationRepository medicationRepository =
+                    new MongoMedicationRepository(mongoConnection.getDatabase());
+            MedicationService medicationService = new MedicationService(medicationRepository);
+            MedicationHandler medicationHandler = new MedicationHandler(medicationService);
 
             // Catálogo experimental somente leitura de apresentações farmacêuticas.
             MedicationPresentationRepository medicationPresentationRepository =

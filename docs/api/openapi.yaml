@@ -19,7 +19,7 @@ servers:
 tags:
 - name: Infraestrutura
 - name: Autenticação
-- name: Catálogo demonstrativo
+- name: Catálogo persistente
 - name: Catálogo experimental
 - name: Tratamentos
 - name: Medicamentos em uso
@@ -47,11 +47,12 @@ paths:
   /medications:
     get:
       tags:
-      - Catálogo demonstrativo
-      summary: Listar medicamentos de exemplo
+      - Catálogo persistente
+      summary: Listar catálogo persistente de medicamentos
       operationId: listCatalogMedications
-      description: Atualmente usa InMemoryMedicationRepository com dois itens fixos; exige Bearer pelo RouteAccessPolicy,
-        não é serviço de preço nem CMED.
+      description: Usa MongoMedicationRepository e preserva o contrato legado id/name. O catálogo contém entradas
+        canônicas e apresentações comerciais identificadas separadamente na persistência; exige Bearer pelo
+        RouteAccessPolicy e não é serviço de preço nem CMED.
       responses:
         '200':
           description: Sucesso
@@ -71,9 +72,10 @@ paths:
       - Catálogo experimental
       summary: Pesquisar apresentações experimentais
       operationId: searchMedicationPresentations
-      description: Consulta somente leitura da collection medication_presentations. O catálogo é experimental, não
-        é uma base farmacêutica completa e não fornece recomendações de posologia. unitCount descreve exclusivamente
-        o conteúdo da embalagem e nunca representa quantityPerAdministration.
+      description: Consulta somente leitura das apresentações comerciais da collection medication_presentations,
+        excluindo entradas canônicas. O catálogo é experimental, não é uma base farmacêutica completa e não fornece
+        recomendações de posologia. unitCount descreve exclusivamente o conteúdo da embalagem e nunca representa
+        quantityPerAdministration.
       parameters:
       - name: q
         in: query
@@ -819,7 +821,7 @@ components:
       required:
       - id
       - name
-      description: Catálogo demonstrativo em memória; não é CMED nem busca de preços.
+      description: Projeção id/name do catálogo persistente; não é CMED nem busca de preços.
     MedicationPresentation:
       type: object
       properties:

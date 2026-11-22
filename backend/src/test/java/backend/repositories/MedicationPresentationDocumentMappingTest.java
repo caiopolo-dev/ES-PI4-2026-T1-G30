@@ -1,14 +1,27 @@
 package backend.repositories;
 
 import backend.models.MedicationPresentation;
+import com.mongodb.MongoClientSettings;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MedicationPresentationDocumentMappingTest {
+
+    @Test
+    void searchFilterKeepsCanonicalMedicationsOutOfPresentationResults() {
+        String filter = MongoMedicationPresentationRepository.searchFilter("losartana")
+                .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry())
+                .toJson();
+
+        assertTrue(filter.contains("catalogEntryType"));
+        assertTrue(filter.contains("$ne"));
+        assertTrue(filter.contains("CANONICAL"));
+    }
 
     @Test
     void mapsExperimentalPresentationWithoutReusingPackageCountAsDose() {

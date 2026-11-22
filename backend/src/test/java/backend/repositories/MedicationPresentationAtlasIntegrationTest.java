@@ -3,6 +3,7 @@ package backend.repositories;
 import backend.config.MongoConnection;
 import backend.models.MedicationPresentation;
 import backend.services.MedicationPresentationService;
+import com.mongodb.client.model.Filters;
 import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ class MedicationPresentationAtlasIntegrationTest {
     void queriesAStoredPresentationUsingTheJavaRepository() {
         try (MongoConnection connection = new MongoConnection()) {
             Document source = connection.getCollection("medication_presentations")
-                    .find()
+                    .find(Filters.ne("catalogEntryType", "CANONICAL"))
                     .first();
             assertNotNull(source, "O catálogo experimental deve conter apresentações.");
 

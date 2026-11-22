@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.Decimal128;
 
 /**
@@ -25,13 +26,7 @@ public final class MongoMedicationPresentationRepository
 
     @Override
     public List<MedicationPresentation> search(String query, int limit) {
-        String expression = Pattern.quote(query);
-        List<Document> documents = collection.find(Filters.or(
-                        Filters.regex("name", expression, "i"),
-                        Filters.regex("productName", expression, "i"),
-                        Filters.regex("brandName", expression, "i"),
-                        Filters.regex("activeIngredient", expression, "i")
-                ))
+        List<Document> documents = collection.find(searchFilter(query))
                 .sort(Sorts.ascending("activeIngredient", "concentration", "manufacturer"))
                 .limit(limit)
                 .into(new ArrayList<>());
@@ -44,6 +39,18 @@ public final class MongoMedicationPresentationRepository
             }
         }
         return List.copyOf(presentations);
+    }
+
+    static Bson searchFilter(String query) {
+        String expression = Pattern.quote(query);
+        return Filters.and(
+                Filters.ne("catalogEntryType", "CANONICAL"),
+                Filters.or(
+                        Filters.regex("name", expression, "i"),
+                        Filters.regex("productName", expression, "i"),
+                        Filters.regex("brandName", expression, "i"),
+                        Filters.regex("activeIngredient", expression, "i")
+                ));
     }
 
     static MedicationPresentation fromDocument(Document document) {
