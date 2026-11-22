@@ -8,12 +8,14 @@ import org.bson.Document;
 public final class UserDocumentMapper {
     // Mapper e um conversor; usei para separar o modelo User do Document, que representa os campos BSON do MongoDB.
     // Centralizei a conversao para gravacao e leitura seguirem os mesmos nomes e tipos de campos.
+    // O repository chama antes de inserir: recebo o modelo Java e devolvo os campos do documento MongoDB.
     public Document toDocument(User user) {
         if (user == null) {
             throw new IllegalArgumentException("Usuário deve ser informado.");
         }
 
         // O id do Java é armazenado como _id no MongoDB.
+        // Os dados da senha ja chegam processados; este mapper so converte e valida, sem calcular o hash.
         return new Document("_id", readText(user.getId(), "_id"))
             .append("name", readText(user.getName(), "name"))
             .append("email", readText(user.getEmail(), "email"))
@@ -24,6 +26,7 @@ public final class UserDocumentMapper {
             .append("passwordIterations", readIterations(user.getPasswordIterations()));
     }
 
+    // Na consulta, faco o caminho inverso para o restante da aplicacao receber User, sem depender de BSON.
     public User fromDocument(Document document) {
         if (document == null) {
             throw new IllegalArgumentException("Documento de usuário deve ser informado.");
@@ -48,6 +51,7 @@ public final class UserDocumentMapper {
             // Informa apenas o campo inválido, sem mostrar seu conteúdo.
             throw new IllegalArgumentException("Campo de usuário inválido: " + field);
         }
+
         return (String) value;
     }
 
@@ -57,6 +61,7 @@ public final class UserDocumentMapper {
         if (!(value instanceof Integer) || ((Integer) value) <= 0) {
             throw new IllegalArgumentException("Campo de usuário inválido: passwordIterations");
         }
+
         return (Integer) value;
     }
 }

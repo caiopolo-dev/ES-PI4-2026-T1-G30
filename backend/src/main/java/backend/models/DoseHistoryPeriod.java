@@ -33,6 +33,7 @@ public record DoseHistoryPeriod(LocalDate from, LocalDate to) {
         }
     }
 
+    // O handler envia os textos da query; devolvo o periodo validado ou erro que ele transforma em 400.
     public static DoseHistoryPeriod parse(String from, String to) {
 
         return new DoseHistoryPeriod(parseDate(from), parseDate(to));

@@ -31,11 +31,14 @@ public final class DoseAccessService {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    // Os fluxos de consulta e registro chamam esta verificacao antes de usar a dose do titular.
     public DosePrevista find(AuthContext context, String doseId) {
         String userId = Objects.requireNonNull(context).userId();
+
         if (doseId == null || doseId.isBlank()) {
             throw notFound();
         }
+
         // Conhecer o ID da dose nao basta: ela tambem precisa pertencer ao titular da sessao.
         return doses.findById(doseId).filter(dose -> userId.equals(dose.getUserId()))
             .orElseThrow(DoseAccessService::notFound);
@@ -44,6 +47,7 @@ public final class DoseAccessService {
     public Optional<RegistroDeDose> findRecord(AuthContext context, String doseId) {
         // Autorizei a dose antes de consultar o registro e conferi tambem o titular do registro encontrado.
         DosePrevista dose = find(context, doseId);
+
         return records.findByPlannedDoseId(dose.getId())
             .filter(record -> context.userId().equals(record.getUserId()));
     }
@@ -51,15 +55,21 @@ public final class DoseAccessService {
     public RegistroDeDose record(AuthContext context, String doseId, DoseAction action, Instant actualTime) {
         synchronized (TreatmentMutationLock.MONITOR) {
             DosePrevista dose = find(context, doseId);
+
             if (dose.getStatus() == ScheduleStatus.CANCELLED) {
+                // Uma ocorrencia cancelada continua no historico, mas nao recebe uma nova acao por este fluxo.
                 throw new IllegalStateException("Dose cancelada.");
             }
+
             // Nao altera registros anteriores nem aceita um ID de registro do cliente.
             if (records.findByPlannedDoseId(dose.getId()).isPresent()) {
                 throw new IllegalStateException("Dose ja possui registro.");
             }
+
+            // actualTime informa quando a acao ocorreu; recordedAt usa o relogio do servidor para marcar a gravacao.
             RegistroDeDose record = new RegistroDeDose(null, dose.getId(), context.userId(),
                     Objects.requireNonNull(action), actualTime, clock.instant());
+
             return records.save(record);
         }
     }

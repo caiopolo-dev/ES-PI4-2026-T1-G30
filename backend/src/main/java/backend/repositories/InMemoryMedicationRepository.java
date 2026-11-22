@@ -10,6 +10,7 @@ import java.util.List;
  * Mantém os medicamentos de exemplo em memória.
  */
 public class InMemoryMedicationRepository implements MedicationRepository {
+    // Esses exemplos sao recriados ao iniciar o programa; nao representam um cadastro salvo no MongoDB.
     // Usei dados em memoria para disponibilizar a listagem inicial sem precisar de banco.
     // Protegi a lista para quem consultar nao conseguir remover ou adicionar itens nela.
     private final List<Medication> medications = Collections.unmodifiableList(

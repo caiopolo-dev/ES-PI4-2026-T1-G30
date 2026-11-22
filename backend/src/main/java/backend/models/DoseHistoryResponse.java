@@ -18,6 +18,7 @@ public record DoseHistoryResponse(
         List<DoseHistoryItem> items) {
 
     public DoseHistoryResponse {
+        // Estes dados sao obrigatorios mesmo com items vazio, para a resposta continuar descrevendo a consulta.
 
         Objects.requireNonNull(from, "Data inicial obrigatoria.");
         Objects.requireNonNull(to, "Data final obrigatoria.");
@@ -26,5 +27,6 @@ public record DoseHistoryResponse(
 
         // Fiz uma copia imutavel porque a lista original nao deve mudar a resposta pronta.
         items = List.copyOf(items);
+        // A copia protege a lista de itens; os campos de cada item ja sao definidos pelo record.
     }
 }

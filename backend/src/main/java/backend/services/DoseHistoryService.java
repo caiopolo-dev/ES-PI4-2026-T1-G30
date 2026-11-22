@@ -40,6 +40,8 @@ public final class DoseHistoryService {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    // HistoryHandler chama com titular, periodo e filtros; devolvo previsoes e acoes em uma resposta unica.
+    // A consulta so le os repositories existentes: nao cria doses nem modifica registros.
     public DoseHistoryResponse getHistory(AuthContext context, DoseHistoryPeriod period,
             String treatmentId, String medicationInUseId) {
 
@@ -66,6 +68,7 @@ public final class DoseHistoryService {
             }
 
             if (treatmentFilter != null && !treatmentFilter.equals(dose.getTreatmentId())) {
+                // Os filtros restringem doses ja autorizadas; um ID alheio nao permite consultar outro titular.
                 continue;
             }
 
@@ -88,6 +91,7 @@ public final class DoseHistoryService {
         // Busquei os registros em lote para evitar uma consulta por dose.
         // Busca em lote consulta varios IDs de uma vez; assim reduzo as idas ao banco.
         Map<String, backend.models.RegistroDeDose> associated = ids.isEmpty()
+            // Sem doses selecionadas, nao preciso fazer outra consulta ao banco.
             ? Map.of() : records.findByPlannedDoseIdsAndUserId(ids, userId);
 
         List<DoseHistoryItem> items = new ArrayList<>();
@@ -124,6 +128,7 @@ public final class DoseHistoryService {
         }
 
         return new DoseHistoryResponse(
+            // A estrutura permanece a mesma mesmo sem itens, facilitando a leitura pelo frontend.
             period.from(),
             period.to(),
             DoseHistoryPeriod.ZONE.getId(),
