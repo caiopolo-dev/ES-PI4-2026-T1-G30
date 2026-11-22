@@ -1,0 +1,22 @@
+{
+  "name": "dosecerta-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App React Native do DoseCerta — Módulo de lembretes de medicamentos (Issue #37)",
+  "scripts": {
+    "test": "node --import ./scripts/ts-resolve-hook.mjs --test __tests__/reminders.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.1.0",
+    "expo-notifications": "^0.31.0",
+    "react": "19.0.0",
+    "react-native": "0.79.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}
+
