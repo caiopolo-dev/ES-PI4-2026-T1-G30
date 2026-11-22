@@ -138,6 +138,10 @@ public class Main {
 
             // Configuração das rotas HTTP
             Router router = new Router(sessionAuthenticator);
+            StaticFileHandler staticFileHandler = new StaticFileHandler();
+            router.register("GET", "/", staticFileHandler);
+            router.register("GET", "/favicon.svg", staticFileHandler);
+            router.register("GET", "/assets/{file}", staticFileHandler);
             router.register("GET", "/health", new HealthHandler());
             router.register("GET", "/medications", medicationHandler);
             router.register("GET", "/doses", agendaHandler);

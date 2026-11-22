@@ -13,6 +13,9 @@ class RouteAccessPolicyTest {
         assertTrue(RouteAccessPolicy.isPublic("GET", "/health"));
         assertTrue(RouteAccessPolicy.isPublic("POST", "/auth/register"));
         assertTrue(RouteAccessPolicy.isPublic("post", "/auth/login"));
+        assertTrue(RouteAccessPolicy.isPublic("GET", "/"));
+        assertTrue(RouteAccessPolicy.isPublic("GET", "/favicon.svg"));
+        assertTrue(RouteAccessPolicy.isPublic("GET", "/assets/index-abc.js"));
         assertFalse(RouteAccessPolicy.requiresAuthentication("GET", "/health"));
     }
 
@@ -33,6 +36,7 @@ class RouteAccessPolicyTest {
         assertTrue(RouteAccessPolicy.requiresAuthentication("GET", "/auth/register"));
         assertTrue(RouteAccessPolicy.requiresAuthentication("GET", "/health/private"));
         assertTrue(RouteAccessPolicy.requiresAuthentication("POST", "/auth/login/"));
+        assertTrue(RouteAccessPolicy.requiresAuthentication("POST", "/assets/index-abc.js"));
     }
 
     @Test
