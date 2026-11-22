@@ -360,6 +360,11 @@ public class Treatment {
     private boolean possuiCronogramaValido() {
 
         for (MedicamentoEmUso medication : medications) {
+            // Medicamentos desativados não devem validar
+            // a ativação de um tratamento.
+            if (!medication.isActive()) {
+                continue;
+            }
 
             Optional<CronogramaDose> cronograma = medication.getActiveSchedule();
 
