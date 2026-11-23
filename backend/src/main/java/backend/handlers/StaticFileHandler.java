@@ -1,3 +1,4 @@
+// Autor: Samuel Campovilla
 package backend.handlers;
 
 import backend.http.HttpRequest;
@@ -9,7 +10,7 @@ import java.io.InputStream;
 import java.util.Locale;
 import java.util.Objects;
 
-/** Serve o build do React empacotado sob o diretório web do classpath. */
+// Serve o build do React empacotado sob o diretório web do classpat
 public final class StaticFileHandler implements HttpHandler {
     private static final String WEB_ROOT = "web/";
 

@@ -1,3 +1,4 @@
+// Autor: Caio Ferreira Polo
 package backend.handlers;
 
 import backend.auth.AuthContext;

@@ -1,3 +1,4 @@
+// Autor: Samuel Campovilla
 package backend.handlers;
 
 import backend.http.HttpRequest;
@@ -11,9 +12,9 @@ import java.util.ArrayList;
 import java.util.Objects;
 import org.bson.Document;
 
-/**
- * Handler responsável por GET /medication-presentations?q=texto.
- */
+
+// Handler responsável por GET /medication-presentations?q=texto.
+
 public final class MedicationPresentationHandler implements HttpHandler {
     private final MedicationPresentationService service;
 
