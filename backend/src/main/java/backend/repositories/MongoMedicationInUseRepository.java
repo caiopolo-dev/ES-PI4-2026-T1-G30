@@ -1,0 +1,186 @@
+// Desenvolvido por Miguel Gallinucci.
+package backend.repositories;
+
+import backend.models.MedicamentoEmUso;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+
+/** Atualiza somente o medicamento selecionado na mesma collection treatments. */
+public final class MongoMedicationInUseRepository implements MedicationInUseRepository {
+    private final MongoCollection<Document> treatments;
+
+    public MongoMedicationInUseRepository(MongoCollection<Document> treatments) {
+        this.treatments = Objects.requireNonNull(treatments);
+    }
+
+    @Override
+    public boolean add(String treatmentId, String userId, MedicamentoEmUso medication) {
+        Objects.requireNonNull(medication);
+
+        if (!medication.getSchedules().isEmpty()) {
+            throw new IllegalArgumentException("Use o fluxo de cronogramas para configurar horarios.");
+        }
+
+        Document document = fields(medication).append("id", medication.getId())
+            .append("active", medication.isActive()).append("revision", 0L).append("schedules", List.of());
+
+        if (medication.getRevision() != 0) {
+            throw new IllegalArgumentException("Novo medicamento deve iniciar na revisao zero.");
+        }
+
+        Bson filter = Filters.and(owner(treatmentId, userId), editable(medication), Filters.ne("medications.id", medication.getId()));
+
+        return treatments.updateOne(filter, Updates.push("medications", document)).getMatchedCount() == 1;
+    }
+
+    @Override
+    public Optional<MedicamentoEmUso> find(
+            String treatmentId,
+            String userId,
+            String medicationId) {
+
+        Document treatment = treatments.find(ownedMedication(treatmentId, userId, medicationId)).first();
+
+        if (treatment == null) {
+            return Optional.empty();
+        }
+
+        // Utiliza a mesma collection MongoDB para reconstruir
+        // o tratamento e localizar seu medicamento.
+        MongoTreatmentRepository repository = new MongoTreatmentRepository(treatments);
+
+        return repository.fromDocument(treatment).findMedicationById(medicationId);
+    }
+
+    @Override
+    public boolean update(String treatmentId, String userId, MedicamentoEmUso medication) {
+        // A edicao comum preserva os cronogramas; so o fluxo versionado pode gravar uma nova lista de versoes.
+        return updateFields(treatmentId, userId, medication, false);
+    }
+
+    @Override
+    public boolean updateWithSchedules(String treatmentId, String userId, MedicamentoEmUso medication) {
+        return updateFields(treatmentId, userId, medication, true);
+    }
+
+    private boolean updateFields(String treatmentId, String userId, MedicamentoEmUso medication, boolean withSchedules) {
+        Objects.requireNonNull(medication);
+        Document changes = new Document();
+
+        // Atualizei apenas os campos do medicamento selecionado para preservar os outros do tratamento.
+        for (var field : fields(medication).entrySet()) {
+            changes.append("medications.$." + field.getKey(), field.getValue());
+        }
+
+        if (withSchedules) {
+            // Reutiliza o formato de persistencia da #28.
+            changes.append("medications.$.schedules", medication.getSchedules().stream()
+                .map(MongoTreatmentRepository::toScheduleDocument).toList());
+        }
+
+        // Preserva ID e estado; as versoes so mudam no fluxo de gravacao conjunta.
+        Bson current = Filters.and(Filters.eq("id", medication.getId()), Filters.ne("active", false),
+            revisionFilter(medication.getRevision()));
+
+        // A revisao e o numero da edicao que o cliente consultou. Imagine duas pessoas editando a mesma revisao:
+        // a primeira grava e incrementa esse numero; a segunda passa a enviar uma revisao antiga.
+        // Inclui a revisao no filtro do MongoDB para essa segunda gravacao nao sobrescrever a primeira.
+        // Isso e controle otimista: a gravacao so acontece se os dados ainda estiverem na revisao esperada.
+        Bson filter = Filters.and(owner(treatmentId, userId), editable(medication), Filters.elemMatch("medications", current));
+
+        return treatments.updateOne(filter, new Document("$set", changes)
+
+            // A atualizacao e atomica: os campos e a revisao deste documento mudam juntos, sem gravacao parcial.
+            .append("$inc", new Document("medications.$.revision", 1L))).getMatchedCount() == 1;
+    }
+
+    @Override
+    public boolean deactivate(String treatmentId, String userId, String medicationId, long revision, int minimumRemainingActive) {
+        if (minimumRemainingActive < 0 || minimumRemainingActive > 1) {
+            throw new IllegalArgumentException("Minimo de medicamentos invalidos.");
+        }
+
+        ownedMedication(treatmentId, userId, medicationId);
+        Bson current = Filters.and(Filters.eq("id", medicationId), Filters.ne("active", false), revisionFilter(revision));
+        Document activeCount = new Document("$size", new Document("$filter",
+            new Document("input", "$medications").append("as", "med")
+                .append("cond", new Document("$ne", List.of(new Document("$ifNull", List.of("$$med.active", true)), false)))));
+
+        // Quantidade e revisao sao conferidas no mesmo comando atomico.
+        Document minimum = new Document("$cond", List.of(
+            new Document("$eq", List.of("$status", "ACTIVE")), 1, minimumRemainingActive));
+
+        // Um tratamento ativo deve manter outro medicamento ativo com cronograma.
+        // Conferi isso no MongoDB para duas desativacoes simultaneas nao deixarem o tratamento vazio.
+        Bson remainingSchedule = Filters.or(Filters.ne("status", "ACTIVE"),
+            Filters.elemMatch("medications", Filters.and(Filters.ne("id", medicationId),
+                Filters.ne("active", false), Filters.elemMatch("schedules", Filters.eq("active", true)))));
+        Bson filter = Filters.and(owner(treatmentId, userId), writableStatus(), remainingSchedule,
+            Filters.elemMatch("medications", current),
+            new Document("$expr", new Document("$gt", List.of(activeCount, minimum))));
+
+        // Desativa o medicamento e registra o instante da operação
+        // no mesmo comando atômico do MongoDB.
+        return treatments.updateOne(
+                filter,
+                Updates.combine(
+                        Updates.set("medications.$.active", false),
+                        Updates.currentDate("medications.$.deactivatedAt"),
+                        Updates.inc("medications.$.revision", 1L)
+                )
+        ).getMatchedCount() == 1;
+
+    }
+
+    private Bson revisionFilter(long revision) {
+        // O limite evita que o incremento da revisao ultrapasse o maior valor de long.
+        if (revision < 0 || revision == Long.MAX_VALUE) {
+            throw new IllegalArgumentException("Revisao invalida.");
+        }
+
+        // Documentos antigos sem revision equivalem a revisao zero.
+        return revision == 0 ? Filters.or(Filters.exists("revision", false), Filters.eq("revision", 0L))
+            : Filters.eq("revision", revision);
+    }
+
+    private Bson writableStatus() {
+        return Filters.in("status", "DRAFT", "ACTIVE");
+    }
+
+    private Bson editable(MedicamentoEmUso medication) {
+        boolean complete = medication.getQuantity() != null && medication.getQuantity() > 0
+            && medication.getUnit() != null && !medication.getUnit().isBlank();
+
+        // Confere o estado na gravacao, mesmo se mudou depois da consulta do servico.
+        return complete ? writableStatus() : Filters.and(writableStatus(), Filters.ne("status", "ACTIVE"));
+    }
+
+    private Bson owner(String treatmentId, String userId) {
+        // O filtro combina o ID do tratamento com o titular, sem confiar apenas no ID recebido.
+        if (treatmentId == null || treatmentId.isBlank() || userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("Tratamento e titular obrigatorios.");
+        }
+
+        return Filters.and(Filters.eq("_id", treatmentId), Filters.eq("userId", userId));
+    }
+
+    private Bson ownedMedication(String treatmentId, String userId, String medicationId) {
+        if (medicationId == null || medicationId.isBlank()) {
+            throw new IllegalArgumentException("Medicamento obrigatorio.");
+        }
+
+        return Filters.and(owner(treatmentId, userId), Filters.eq("medications.id", medicationId));
+    }
+
+    private Document fields(MedicamentoEmUso medication) {
+        return new Document("name", medication.getName()).append("dose", medication.getDose())
+            .append("quantity", medication.getQuantity()).append("unit", medication.getUnit())
+            .append("observations", medication.getObservations());
+    }
+}

@@ -1,0 +1,75 @@
+// Autores: Caio Ferreira Polo, Cauã Bianchi Ferroni, Samuel Campovilla
+package backend.repositories;
+
+import backend.models.CronogramaDose;
+import backend.models.Treatment;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Define as operações necessárias para persistir e recuperar tratamentos,
+ * preservando a associação com o titular (usuário) e o histórico de cronogramas.
+ */
+public interface TreatmentRepository {
+
+    /**
+     * Persiste um novo tratamento associado a um usuário.
+     */
+    Treatment save(Treatment treatment);
+
+    /**
+     * Recupera um tratamento pelo seu identificador único.
+     */
+    Optional<Treatment> findById(String id);
+
+    /**
+     * Lista todos os tratamentos pertencentes a um usuário específico (titular).
+     */
+    List<Treatment> findByUserId(String userId);
+
+    /**
+     * Atualiza um tratamento existente preservando medicamentos em uso
+     * e versões históricas dos cronogramas.
+     */
+    Treatment update(Treatment treatment);
+
+    /**
+     * Recupera um tratamento pelo ID filtrando também pelo identificador do titular.
+     */
+    default Optional<Treatment> findByIdAndUserId(String id, String userId) {
+        if (id == null || userId == null) {
+            return Optional.empty();
+        }
+        return findById(id).filter(treatment -> userId.equals(treatment.getUserId()));
+    }
+
+    // issue 28 - Atualiza atomicamente o histórico do cronograma usando a revisão do medicamento.
+    default boolean updateMedicationSchedules(
+            String treatmentId,
+            String userId,
+            String medicationId,
+            long expectedRevision,
+            List<CronogramaDose> schedules) {
+        throw new UnsupportedOperationException("Atualização de cronogramas não suportada");
+    }
+
+    // record é um tipo especial de classe utilizado para armazenar
+    // e transportar dados de maneira simples.
+    //
+    // O Java gera automaticamente o construtor, os métodos de acesso
+    // aos atributos, equals(), hashCode() e toString().
+    //
+    // Seus atributos são final, impedindo que sejam reatribuídos.
+    //
+    // Utilizamos um record neste caso pois precisamos apenas transportar
+    // os identificadores do usuário e do tratamento.
+    record ReconciliationTarget(String userId, String treatmentId) {
+    }
+
+    // Recupera os tratamentos ativos e encerrados que devem ser reconciliados.
+    default List<ReconciliationTarget> findDoseReconciliationTargets() {
+
+        throw new UnsupportedOperationException("Consulta para reconciliação não implementada");
+    }
+}
+
