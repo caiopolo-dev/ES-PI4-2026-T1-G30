@@ -1,4 +1,4 @@
-
+// Desenvolvido por Caio Ferreira Polo.
 package backend.repositories;
 
 import backend.models.AuthSession;
@@ -17,6 +17,11 @@ import java.util.concurrent.TimeUnit;
 
 import org.bson.Document;
 
+/**
+ * Armazena e consulta sessões na coleção do MongoDB.
+ * A persistência permite reconhecer o mesmo token em requisições diferentes
+ * e registrar quando uma sessão foi encerrada.
+ */
 public class MongoSessionRepository implements SessionRepository {
 
     private final MongoCollection<Document> collection;
@@ -25,12 +30,14 @@ public class MongoSessionRepository implements SessionRepository {
         this.collection = java.util.Objects.requireNonNull(collection);
 
         try {
-            // Impede duas sessões com o mesmo hash.
+            // O índice único impede que duas sessões usem o mesmo hash de token.
             collection.createIndex(Indexes.ascending("tokenHash"), new IndexOptions().unique(true));
 
+            // Este índice facilita consultas relacionadas ao titular da sessão.
             collection.createIndex(Indexes.ascending("userId"));
 
-            // Remove sessões expiradas do banco eventualmente.
+            // O índice TTL permite que o MongoDB remova documentos depois de expiresAt.
+            // A remoção é automática e pode não acontecer exatamente no instante da expiração.
             collection.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().expireAfter(0L, TimeUnit.SECONDS));
 
         } catch (MongoException e) {
@@ -43,6 +50,7 @@ public class MongoSessionRepository implements SessionRepository {
     @Override
     public void save(AuthSession session) {
 
+        // Converto a sessão para Document porque esse é o formato persistido no MongoDB.
         Document document = new Document()
             .append("tokenHash", session.getTokenHash())
             .append("userId", session.getUserId())
@@ -63,6 +71,7 @@ public class MongoSessionRepository implements SessionRepository {
     public Optional<AuthSession> findByTokenHash(String tokenHash) {
 
         try {
+            // A consulta usa o hash; o token original não precisa ser armazenado no banco.
             Document document = collection.find(Filters.eq("tokenHash", tokenHash)).first();
             if (document == null) {
                 return Optional.empty();
@@ -70,6 +79,8 @@ public class MongoSessionRepository implements SessionRepository {
 
             Date revokedAt = document.getDate("revokedAt");
 
+            // Reconstruo o modelo para que o SessionService possa verificar
+            // expiração e revogação. O repository apenas recupera os dados.
             AuthSession session = new AuthSession(
                 document.getString("tokenHash"),
                 document.getString("userId"),
@@ -91,6 +102,8 @@ public class MongoSessionRepository implements SessionRepository {
     public boolean revoke(String tokenHash, Instant revokedAt) {
 
         try {
+            // A revogação é lógica: mantenho o documento e preencho revokedAt.
+            // A atualização só aceita uma sessão ainda não revogada e não expirada.
             var result = collection.updateOne(
                 Filters.and(
                     Filters.eq("tokenHash", tokenHash),
@@ -100,6 +113,7 @@ public class MongoSessionRepository implements SessionRepository {
                 Updates.set("revokedAt", Date.from(revokedAt))
             );
 
+            // Uma alteração confirma que exatamente uma sessão ativa foi encerrada.
             return result.getModifiedCount() == 1;
 
         } catch (MongoException e) {
