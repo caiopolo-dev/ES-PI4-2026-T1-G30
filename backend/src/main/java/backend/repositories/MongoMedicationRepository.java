@@ -1,4 +1,4 @@
-//Caio Ferreira Polo issue 40
+// Desenvolvido por Caio Ferreira Polo.
 package backend.repositories;
 
 import backend.models.Medication;
@@ -16,6 +16,11 @@ import java.util.Objects;
 import java.util.Optional;
 import org.bson.Document;
 
+/**
+ * Persiste e consulta o catálogo de medicamentos no MongoDB.
+ * O repository converte os documentos do banco em objetos Medication
+ * sem levar detalhes de persistência para as outras camadas.
+ */
 public class MongoMedicationRepository implements MedicationRepository {
     public static final String COLLECTION_NAME = "medication_presentations";
     public static final String RENAME_SOURCE = "RENAME_2024_DCB";
@@ -41,12 +46,14 @@ public class MongoMedicationRepository implements MedicationRepository {
      * Insere somente documentos ausentes; nunca substitui ou remove dados existentes.
      */
     public void ensureDefaultCatalog() {
+        // O índice ajuda a organizar consultas pelo nome do medicamento.
         collection.createIndex(Indexes.ascending("name"));
         for (Document seed : defaultCatalogDocuments()) {
             String id = seed.getString("_id");
             Document values = new Document(seed);
             values.remove("_id");
             values.append("createdAt", new Date());
+            // upsert cria o documento ausente, e $setOnInsert preserva um item já existente.
             collection.updateOne(
                     Filters.eq("_id", id),
                     new Document("$setOnInsert", values),
@@ -56,6 +63,7 @@ public class MongoMedicationRepository implements MedicationRepository {
 
     @Override
     public List<Medication> findAll() {
+        // Ordeno pelo identificador para devolver o catálogo em uma sequência estável.
         List<Medication> medications = new ArrayList<>();
         for (Document document : collection.find().sort(Sorts.ascending("_id"))) {
             Medication medication = fromDocument(document);
@@ -68,6 +76,7 @@ public class MongoMedicationRepository implements MedicationRepository {
 
     @Override
     public Optional<Medication> findById(String id) {
+        // Um identificador vazio não representa um documento que possa ser consultado.
         if (id == null || id.isBlank()) {
             return Optional.empty();
         }
@@ -76,6 +85,7 @@ public class MongoMedicationRepository implements MedicationRepository {
     }
 
     private static Medication fromDocument(Document document) {
+        // Documentos incompletos são ignorados em vez de gerar medicamentos inválidos.
         if (document == null) {
             return null;
         }
@@ -92,6 +102,8 @@ public class MongoMedicationRepository implements MedicationRepository {
     }
 
     private static String presentationName(Document document) {
+        // Registros de apresentação mais antigos podem não possuir o campo name;
+        // nesse caso, reconstruo o texto usando seus dados farmacêuticos.
         String ingredient = document.getString("activeIngredient");
         String concentration = document.getString("concentration");
         String manufacturer = document.getString("manufacturer");
@@ -106,6 +118,7 @@ public class MongoMedicationRepository implements MedicationRepository {
     }
 
     static List<Document> defaultCatalogDocuments() {
+        // O catálogo reúne as apresentações iniciais e os medicamentos canônicos.
         List<Document> catalog = new ArrayList<>();
         addOriginalPresentations(catalog);
         addCanonicalMedications(catalog);

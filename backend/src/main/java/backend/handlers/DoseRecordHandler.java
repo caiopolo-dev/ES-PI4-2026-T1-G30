@@ -1,3 +1,4 @@
+// Desenvolvido por Caio Ferreira Polo.
 package backend.handlers;
 
 import backend.auth.AuthContext;
@@ -15,7 +16,11 @@ import java.util.Objects;
 import java.util.Set;
 import org.bson.Document;
 
-/** Fronteira HTTP para PUT /doses/{id}/record. */
+/**
+ * Recebe o registro de uma dose pela rota PUT /doses/{id}/record.
+ * O handler valida o contrato HTTP e entrega ao DoseService as regras
+ * relacionadas à dose, à titularidade e aos conflitos de registro.
+ */
 public final class DoseRecordHandler implements HttpHandler {
     private static final int MAX_BODY_BYTES = 16 * 1024;
     private static final Set<String> FIELDS = Set.of("action");
@@ -28,6 +33,7 @@ public final class DoseRecordHandler implements HttpHandler {
 
     @Override
     public HttpResponse handle(HttpRequest request) {
+        // A identidade vem da sessão autenticada, não de um ID enviado no corpo.
         AuthContext context = request.getAuthContext().orElse(null);
         if (context == null) {
             return HttpResponse.unauthorized("Invalid, expired, or missing session");
@@ -48,6 +54,7 @@ public final class DoseRecordHandler implements HttpHandler {
 
         try {
 
+            // Primeiro interpreto a ação; depois o service localiza e registra a dose.
             DoseAction action = parseAction(request);
             DosePrevista plannedDose = service.findPlannedDose(context, path[2]);
             RegistroDeDose record = service.recordDose(context, path[2], action);
@@ -58,6 +65,7 @@ public final class DoseRecordHandler implements HttpHandler {
             return HttpResponse.notFound("Dose nao encontrada.");
         } catch (DoseRecordConflictException error) {
 
+            // O conflito indica que a dose não pode receber a operação solicitada.
             return new HttpResponse(409, "Conflict", "{\"error\":\"Operacao de registro em conflito.\"}");
         } catch (IllegalArgumentException error) {
 
@@ -69,6 +77,7 @@ public final class DoseRecordHandler implements HttpHandler {
     }
 
     private DoseAction parseAction(HttpRequest request) {
+        // Este endpoint aceita somente um objeto JSON com a ação da dose.
         String contentType = request.getHeader("Content-Type");
 
         if (contentType == null || !contentType.split(";", 2)[0].trim().equalsIgnoreCase("application/json")) {
@@ -76,6 +85,7 @@ public final class DoseRecordHandler implements HttpHandler {
         }
 
         String body = request.getBody();
+        // O limite evita processar um corpo inesperadamente grande para uma operação simples.
         if (body.isBlank() || body.getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES) {
             throw new IllegalArgumentException("Corpo vazio ou acima de 16 KiB.");
         }
@@ -89,6 +99,7 @@ public final class DoseRecordHandler implements HttpHandler {
         }
 
         if (!FIELDS.containsAll(data.keySet()) || !data.containsKey("action")) {
+            // Campos extras ou a ausência de action tornam o comando inválido.
             throw new IllegalArgumentException("Payload invalido.");
         }
 
@@ -108,6 +119,7 @@ public final class DoseRecordHandler implements HttpHandler {
     }
 
     private String toJson(RegistroDeDose record, DosePrevista plannedDose) {
+        // A resposta combina o registro realizado com os dados da dose planejada.
         return new Document("plannedDoseId", record.getPlannedDoseId())
                 .append("action", record.getAction().name())
                 .append("scheduledAt", plannedDose.getScheduledAt().toString())

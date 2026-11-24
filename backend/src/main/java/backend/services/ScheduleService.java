@@ -1,4 +1,4 @@
-// Autor: Caio Ferreira Polo
+// Desenvolvido por Caio Ferreira Polo.
 package backend.services;
 
 import backend.auth.AuthContext;
@@ -19,6 +19,11 @@ import java.util.ArrayList;
 
 // issue 28
 // Responsável por consultar, versionar e persistir cronogramas.
+/**
+ * Concentra as regras de consulta e versionamento dos cronogramas.
+ * O service verifica o acesso ao tratamento e utiliza o repository para
+ * persistir o histórico sem substituir as versões anteriores.
+ */
 public class ScheduleService {
 
     private final TreatmentAccessService accessService;
@@ -206,6 +211,8 @@ public class ScheduleService {
             Instant inicioVigencia,
             long expectedRevision) {
 
+        // O monitor evita que duas alterações de tratamento sejam preparadas
+        // ao mesmo tempo dentro deste processo.
         synchronized (TreatmentMutationLock.MONITOR) {
             if (expectedRevision < 0 || expectedRevision == Long.MAX_VALUE) {
                 throw new IllegalArgumentException("Revisão inválida");
@@ -232,6 +239,8 @@ public class ScheduleService {
             }
 
             if (atual.getRevision() != expectedRevision) {
+                // A revisão informa se outro processo alterou o medicamento
+                // desde a última leitura feita pelo cliente.
                 throw new MedicationOperationConflictException("Cronograma alterado. Consulte os dados novamente.");
             }
 
@@ -255,6 +264,8 @@ public class ScheduleService {
             );
 
             if (!gravado) {
+                // Se a gravação condicional falhar, releio o estado para distinguir
+                // uma repetição válida de uma alteração concorrente diferente.
                 MedicamentoEmUso concorrente = accessService.findMedication(
                         context, treatmentId, medicationId);
                 // issue 28 - Não converte um histórico concorrente inconsistente em sucesso idempotente.
@@ -391,6 +402,7 @@ public class ScheduleService {
 
     // issue 28 - Garante que quaisquer duas versões respeitem intervalos [validFrom, validTo).
     private void validarIntegridadeHistorico(List<CronogramaDose> historico) {
+        // Cada versão deve ocupar um intervalo próprio e somente uma pode ficar ativa.
         int quantidadeAtivas = 0;
         for (int i = 0; i < historico.size(); i++) {
             CronogramaDose primeiro = historico.get(i);
@@ -471,6 +483,8 @@ public class ScheduleService {
             String treatmentId,
             MedicamentoEmUso medicamento) {
 
+        // Depois de persistir o cronograma, atualizo as doses planejadas para
+        // refletir a versão que passou a valer.
         if (doseGenerationService != null) {
             doseGenerationService.reconcile(context.userId(), treatmentId);
         }

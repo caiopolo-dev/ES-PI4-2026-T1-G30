@@ -1,3 +1,4 @@
+// Desenvolvido por Caio Ferreira Polo.
 package backend.handlers;
 import java.util.Map;
 import java.util.Objects;
@@ -11,6 +12,11 @@ import backend.services.AuthService;
 import org.bson.Document;
 import backend.models.User;
 
+/**
+ * Recebe a requisição HTTP de cadastro e devolve a resposta adequada.
+ * O handler valida o formato da entrada, enquanto o AuthService aplica
+ * as regras de cadastro e utiliza o repository para persistir o usuário.
+ */
 public class AuthHandler implements HttpHandler  {
 
     private final AuthService authService;
@@ -25,6 +31,8 @@ public class AuthHandler implements HttpHandler  {
     @Override
     public HttpResponse handle(HttpRequest request) {
 
+        // Confiro o Content-Type antes de interpretar o corpo, pois este endpoint
+        // aceita somente os dados de cadastro enviados como JSON.
         Map<String, String> headers = request.getHeaders();
         String contentType = headers.entrySet()
             .stream()
@@ -37,7 +45,7 @@ public class AuthHandler implements HttpHandler  {
             return HttpResponse.badRequest("Content-Type inválido. Esperado: application/json");
         }
 
-        //pega o corpo da requisição
+        // Um corpo ausente não contém os dados mínimos para tentar o cadastro.
         String body = request.getBody();     
         if (body == null || body.isBlank()) {  
             return HttpResponse.badRequest("Corpo da requisição vazio.");
@@ -45,21 +53,23 @@ public class AuthHandler implements HttpHandler  {
 
 
         
-        // documento JSON a partir do corpo da requisição
+        // Document.parse transforma o texto JSON em um objeto que permite
+        // consultar cada campo pelo nome.
         Document json;
         try {
             json = Document.parse(body);
         } catch (org.bson.json.JsonParseException e) {
             return HttpResponse.badRequest("JSON inválido.");
         }
-        // Valida os campos do JSON
+        // Verifico também os tipos para não aceitar números, listas ou objetos
+        // onde o fluxo de cadastro espera textos.
         if (!(json.get("name") instanceof String) || !(json.get("email") instanceof String) || !(json.get("password") instanceof String)) {
             return HttpResponse.badRequest("Nome, e-mail e senha devem ser textos.");
         }
 
 
 
-        // Cria o objeto RegisterRequest a partir do JSON
+        // O DTO leva os dados ao service sem acoplar a regra de negócio ao JSON.
         String name = json.getString("name");
         String email = json.getString("email");
         String password = json.getString("password");
@@ -67,7 +77,8 @@ public class AuthHandler implements HttpHandler  {
         
 
 
-        // Tenta cadastrar o usuário e retorna HTTP 400 para dados inválidos, 409 para e-mail duplicado e 500 para falhas de persistência.
+        // Cada tipo de falha é convertido em um status HTTP apropriado:
+        // dados inválidos geram 400, e-mail duplicado gera 409 e falhas internas geram 500.
         User user;
         try {
             user = authService.register(registerRequest);
@@ -82,6 +93,8 @@ public class AuthHandler implements HttpHandler  {
            return HttpResponse.internalServerError("Erro interno ao cadastrar usuário.");
         }
 
+        // A resposta expõe somente os dados públicos da conta; hash e salt da senha
+        // permanecem no servidor e nunca são enviados ao cliente.
         String responseJson = new Document().append("id", user.getId()).append("name", user.getName()).append("email", user.getEmail()).toJson();
         return new HttpResponse(201, "Created", responseJson);
     }

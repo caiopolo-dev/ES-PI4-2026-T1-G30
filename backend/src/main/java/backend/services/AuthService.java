@@ -1,3 +1,4 @@
+// Desenvolvido por Caio Ferreira Polo.
 package backend.services;
 
 import java.util.Objects;
@@ -10,6 +11,10 @@ import backend.models.User;
 import backend.repositories.UserPersistenceException;
 
 
+/**
+ * Aplica as regras de cadastro e envia o novo usuário ao repository.
+ * Também prepara a senha para que ela nunca seja armazenada em texto puro.
+ */
 public class AuthService {
 
     private final UserRepository userRepository;
@@ -22,6 +27,8 @@ public class AuthService {
     public User register(RegisterRequest request) {
         Objects.requireNonNull(request);
 
+        // Nome, e-mail e senha são conferidos aqui para manter as regras
+        // de cadastro separadas do handler HTTP.
         String name = request.getName();
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Nome não pode ser vazio.");
@@ -37,6 +44,7 @@ public class AuthService {
             throw new IllegalArgumentException("E-mail não pode ser vazio.");
         }
         String emailNormalized = email.trim().toLowerCase(Locale.ROOT);
+        // A normalização permite comparar o mesmo e-mail mesmo com maiúsculas ou espaços.
         if (!emailNormalized.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
             throw new IllegalArgumentException("Formato de e-mail inválido.");
         }
@@ -56,10 +64,13 @@ public class AuthService {
         }
 
         if (userRepository.findByEmail(emailNormalized).isPresent()) {
+            // Não permito duas contas associadas ao mesmo e-mail normalizado.
             throw new UserPersistenceException(UserPersistenceException.Reason.DUPLICATE_USER);
         }
 
 
+        // O salt é aleatório para cada conta. O banco recebe somente o salt e o hash,
+        // nunca a senha original informada pelo usuário.
         PasswordHasher passwordHasher = new PasswordHasher(); //objeto da classe PasswordHasher
         byte[] salt = passwordHasher.generateSalt(); // Gera um salt aleatório de 16 bytes
         byte[] hashedPassword = passwordHasher.hashPassword(password.toCharArray(), salt); // Criptografa usando o salt gerado + senha 
@@ -68,6 +79,8 @@ public class AuthService {
 
         String id = UUID.randomUUID().toString();
 
+        // Registro junto ao usuário quais parâmetros foram usados no hash,
+        // pois o login precisará deles para verificar a senha futuramente.
         User user = new User(
             id,
             name,
@@ -79,6 +92,7 @@ public class AuthService {
             PasswordHasher.ITERATIONS
         );
 
+        // O repository cuida dos detalhes de persistência no MongoDB.
         userRepository.save(user);
         return user;
 

@@ -1,4 +1,4 @@
-// Autor: Caio Ferreira Polo
+// Desenvolvido por Caio Ferreira Polo.
 package backend.handlers;
 
 import backend.auth.AuthContext;
@@ -21,6 +21,11 @@ import java.util.Set;
 import org.bson.Document;
 
 // issue 28 - Expõe somente a configuração e a consulta dos cronogramas.
+/**
+ * Recebe as requisições de consulta e atualização de cronogramas.
+ * O handler valida o contrato HTTP e encaminha as regras de negócio
+ * ao ScheduleService, sem acessar o MongoDB diretamente.
+ */
 public final class ScheduleHandler implements HttpHandler {
     private static final Set<String> FIELDS = Set.of(
             "frequency", "daysOfWeek", "times", "startDate", "endDate",
@@ -42,6 +47,7 @@ public final class ScheduleHandler implements HttpHandler {
     @Override
     // issue 28 - Valida caminho, autenticação e converte erros de domínio em HTTP.
     public HttpResponse handle(HttpRequest request) {
+        // A sessão fornece a identidade usada pelo service para conferir a titularidade.
         AuthContext context = request.getAuthContext().orElse(null);
         if (context == null) {
             return HttpResponse.unauthorized("Invalid, expired, or missing session");
@@ -62,6 +68,7 @@ public final class ScheduleHandler implements HttpHandler {
 
         try {
             if ("GET".equals(request.getMethod())) {
+                // A consulta não aceita corpo e devolve a versão atual junto ao histórico.
                 if (!request.getBody().isBlank()) {
                     return HttpResponse.badRequest("Corpo nao suportado.");
                 }
@@ -75,6 +82,8 @@ public final class ScheduleHandler implements HttpHandler {
             }
 
             Document data = parseBody(request);
+            // O cliente envia a configuração e a revisão que conhecia;
+            // o service decide se uma nova versão pode ser persistida.
             CronogramaDose configuration = configuration(data);
             Instant validFrom = instant(data, "validFrom");
             long revision = revision(data);
@@ -83,8 +92,10 @@ public final class ScheduleHandler implements HttpHandler {
                     context, path[2], path[4], configuration, validFrom, revision);
             return HttpResponse.ok(toJson(context, path[2], path[4], medication));
         } catch (IllegalArgumentException invalid) {
+            // Dados fora do contrato são erros de requisição.
             return HttpResponse.badRequest("Dados de cronograma invalidos.");
         } catch (IllegalStateException conflict) {
+            // Conflitos de versão ou estado indicam que a operação não pode ser aplicada agora.
             return new HttpResponse(
                     409, "Conflict", "{\"error\":\"Operacao de cronograma em conflito.\"}");
         }

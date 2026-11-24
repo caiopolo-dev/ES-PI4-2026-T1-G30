@@ -1,4 +1,4 @@
-
+// Desenvolvido por Caio Ferreira Polo.
 package backend.services;
 
 import backend.models.AuthSession;
@@ -16,6 +16,10 @@ import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
 
+/**
+ * Cria, resolve e revoga as sessões usadas nas rotas autenticadas.
+ * O token original fica com o cliente; o repository recebe somente seu hash.
+ */
 public class SessionService {
 
     private static final Duration SESSION_DURATION = Duration.ofHours(24);
@@ -38,6 +42,7 @@ public class SessionService {
 
     public String create(String userId) {
 
+        // Toda sessão precisa estar vinculada a um usuário identificado.
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("Usuário inválido.");
         }
@@ -46,12 +51,14 @@ public class SessionService {
         secureRandom.nextBytes(randomBytes);
 
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+        // Armazenar apenas o hash reduz o impacto caso os documentos sejam expostos.
         String tokenHash = hashToken(token);
 
         Instant createdAt = Instant.now(clock);
         Instant expiresAt = createdAt.plus(SESSION_DURATION);
 
         AuthSession session = new AuthSession(tokenHash, userId, createdAt, expiresAt, null );
+        // A persistência permite validar o mesmo token nas próximas requisições.
         sessionRepository.save(session);
 
         return token;
@@ -59,6 +66,7 @@ public class SessionService {
 
     public Optional<AuthSession> resolve(String token) {
 
+        // Rejeito formatos inesperados antes de consultar o repository.
         if (!isValidTokenFormat(token)) {
             return Optional.empty();
         }
@@ -75,10 +83,12 @@ public class SessionService {
         Instant now = Instant.now(clock);
 
         if (found.getRevokedAt() != null) {
+            // Uma sessão encerrada por logout não pode autenticar novamente.
             return Optional.empty();
         }
 
         if (!found.getExpiresAt().isAfter(now)) {
+            // Mesmo que o documento ainda exista no banco, a data limita sua validade.
             return Optional.empty();
         }
 
@@ -87,6 +97,7 @@ public class SessionService {
 
     public boolean revoke(String token) {
 
+        // Um token malformado não identifica uma sessão que possa ser revogada.
         if (!isValidTokenFormat(token)) {
             return false;
         }
@@ -113,6 +124,7 @@ public class SessionService {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
 
+            // SHA-256 produz a identificação persistida sem guardar o token original.
             byte[] hash = digest.digest(token.getBytes(StandardCharsets.US_ASCII));//pega os bytes do token e aplica o sha-256 fazendo o hash
             return HexFormat.of().formatHex(hash);
 
